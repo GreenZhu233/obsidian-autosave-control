@@ -33,7 +33,8 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Asset
+      # Upload the zip file
+      - name: Upload Release Asset (Zip)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -42,3 +43,25 @@ jobs:
           asset_path: ./obsidian-autosave-control.zip  # Path to the .zip file
           asset_name: obsidian-autosave-control.zip    # Name of the file in the release
           asset_content_type: application/zip
+
+      # Upload main.js
+      - name: Upload Release Asset (main.js)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./main.js  # Path to the main.js file
+          asset_name: main.js    # Name of the file in the release
+          asset_content_type: application/javascript
+
+      # Upload manifest.json
+      - name: Upload Release Asset (manifest.json)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./manifest.json  # Path to the manifest.json file
+          asset_name: manifest.json    # Name of the file in the release
+          asset_content_type: application/json
