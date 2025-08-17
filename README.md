@@ -1,7 +1,5 @@
 # Obsidian Autosave Control
 
-⚠️ **WARNING** ⚠️: Please use this plugin with caution only on vaults with backed up data because it is in **alpha release**!
-
 ## Introduction
 
 The **Obsidian Autosave Control** is an Obsidian plugin designed to manage file saving behavior by temporarily deferring file saves during editing. It provides control over when files are saved to disk, helping to prevent issues related to rapid or unintended saves, such as conflicts with external synchronization services or version control systems.
@@ -121,7 +119,6 @@ Once the plugin is installed and enabled, it operates automatically.
 - **Data in Memory**: Changes are held in memory during the lock period. In the unlikely event of a crash, unsaved changes during the lock period may be lost.
 - **No Conflict Resolution**: The plugin does not handle merge conflicts or synchronization issues beyond controlling the save timing.
 - **Obsidian Updates**: Future updates to Obsidian's API may affect the plugin's functionality.
-- ⚠️ **WARNING** ⚠️: Please use this plugin with caution only on vaults with backed up data because it is in **alpha release**!
 
 ## Contributing
 
@@ -197,7 +194,4 @@ If you encounter any issues or have questions, please open an issue on the GitHu
 
 ---
 
-**Note**: Always ensure you have backups of your important data. Use this plugin at your own risk.
-
-
-
+**Disclaimer**: Always ensure you have backups of your important data. Use this plugin at your own risk.
