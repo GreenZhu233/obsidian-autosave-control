@@ -24,7 +24,7 @@ Instead of saving every second (Obsidian default), this plugin makes Obsidian wa
 1. **Download** the latest release from [GitHub Releases](https://github.com/mihasm/obsidian-autosave-control/releases).  
 2. **Extract** the `.zip` file.  
 3. Copy the files into:
-your-vault/.obsidian/plugins/obsidian-autosave-control
+your-vault/.obsidian/plugins/autosave-control
 
 4. In Obsidian, go to **Settings > Community plugins**, turn off **Safe mode** if needed, and **enable** the plugin.  
 

@@ -14,7 +14,7 @@ export default class AutoSaveControlPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
-    console.log("loading obsidian-autosave-control plugin");
+    console.log("loading autosave-control plugin");
 
     // UI
     this.status = new StatusIndicator(this);
