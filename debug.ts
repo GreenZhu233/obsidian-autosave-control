@@ -1,0 +1,5 @@
+// Single compile-time dev flag.
+export const DEBUG_LOGGING = false;
+export const dlog = (...a: any[]) => {
+  if (DEBUG_LOGGING) console.log("[obsidian-autosave-control]", ...a);
+};

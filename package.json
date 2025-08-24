@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-autosave-control",
-	"version": "0.0.2",
+	"version": "0.0.4",
 	"description": "A plugin that allows setting a custom autosave interval.",
 	"main": "main.js",
 	"scripts": {
@@ -8,7 +8,15 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},
-	"keywords": ["save","frequency","file","autosave","interval","period","time"],
+	"keywords": [
+		"save",
+		"frequency",
+		"file",
+		"autosave",
+		"interval",
+		"period",
+		"time"
+	],
 	"author": "Miha Smrekar",
 	"license": "MIT",
 	"devDependencies": {
@@ -20,5 +28,8 @@
 		"obsidian": "latest",
 		"tslib": "2.4.0",
 		"typescript": "4.7.4"
+	},
+	"dependencies": {
+		"watch": "^1.0.2"
 	}
 }
