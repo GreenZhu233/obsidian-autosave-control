@@ -1,11 +1,11 @@
+// src/ui/SettingsTab.ts
 import { PluginSettingTab, Setting, App } from "obsidian";
 import type { AutoSaveControlSettings } from "../types";
 
 export interface SettingsHost {
   settings: AutoSaveControlSettings;
   saveSettings(): Promise<void>;
-  applyOrRemovePatches(): void;
-  updateTimeouts(): void;
+  applyColors(): void; // NEW
 }
 
 export class AutoSaveControlSettingTab extends PluginSettingTab {
@@ -31,8 +31,47 @@ export class AutoSaveControlSettingTab extends PluginSettingTab {
             n = Math.max(3, Math.min(3600, n));
             this.host.settings.saveInterval = n;
             await this.host.saveSettings();
-            this.host.updateTimeouts();
           })
       );
+
+    new Setting(containerEl)
+      .setName("Saved color")
+      .setDesc("Status dot color when all changes are saved.")
+      .addColorPicker?.((p) =>
+        p.setValue(this.host.settings.savedColor).onChange(async (v) => {
+          this.host.settings.savedColor = v;
+          await this.host.saveSettings();
+          this.host.applyColors();
+        })
+      ) ?? // fallback if addColorPicker is not available
+      new Setting(containerEl)
+        .setName("Saved color (hex)")
+        .addText((t) =>
+          t.setValue(this.host.settings.savedColor).onChange(async (v) => {
+            this.host.settings.savedColor = v;
+            await this.host.saveSettings();
+            this.host.applyColors();
+          })
+        );
+
+    new Setting(containerEl)
+      .setName("Pending color")
+      .setDesc("Status dot color when saves are pending.")
+      .addColorPicker?.((p) =>
+        p.setValue(this.host.settings.pendingColor).onChange(async (v) => {
+          this.host.settings.pendingColor = v;
+          await this.host.saveSettings();
+          this.host.applyColors();
+        })
+      ) ?? // fallback
+      new Setting(containerEl)
+        .setName("Pending color (hex)")
+        .addText((t) =>
+          t.setValue(this.host.settings.pendingColor).onChange(async (v) => {
+            this.host.settings.pendingColor = v;
+            await this.host.saveSettings();
+            this.host.applyColors();
+          })
+        );
   }
 }

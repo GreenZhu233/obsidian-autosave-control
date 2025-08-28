@@ -1,69 +1,66 @@
 // src/main.ts
-import { Plugin, MarkdownView } from "obsidian";
+import { Plugin } from "obsidian";
 import { AutoSaveController } from "./core/AutoSaveController";
 import { StatusIndicator } from "./ui/StatusIndicator";
 import { AutoSaveControlSettingTab } from "./ui/SettingsTab";
 import { DEFAULT_SETTINGS, AutoSaveControlSettings } from "./types";
-import { dlog } from "./debug";
 
 export default class AutoSaveControlPlugin extends Plugin {
   settings!: AutoSaveControlSettings;
-
   private status!: StatusIndicator;
   private controller!: AutoSaveController;
+  private styleEl: HTMLStyleElement | null = null;
 
   async onload() {
-    await this.loadSettings();
-    console.log("loading autosave-control plugin");
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
-    // UI
+    // status indicator
     this.status = new StatusIndicator(this);
     this.status.attach();
 
-    // Core
+    // controller
     this.controller = new AutoSaveController(this.app, () => this.settings);
     this.controller.setPendingCallback((count) => this.status.setPending(count));
+    this.controller.apply();
 
-    // Settings tab
+    // css
+    this.installStyle();
+    this.applyColors();
+
+    // settings tab
     this.addSettingTab(new AutoSaveControlSettingTab(this.app, this as any));
-
-    // Apply save interception hooks
-    this.applyOrRemovePatches();
-
-    // Events
-    this.registerEvent(
-      this.app.workspace.on("quit", () => this.controller.handleQuitOrClose())
-    );
-    this.registerEvent(
-      this.app.workspace.on("window-close", () => this.controller.handleQuitOrClose())
-    );
-    this.registerEvent(
-      this.app.vault.on("rename", (f, oldPath) => this.controller.handleRename(f, oldPath))
-    );
   }
 
-  onunload(): void {
-    this.restoreOriginals();
-    void this.controller.flushAll();
-    dlog("Plugin unloaded");
+  onunload() {
+    this.controller.restore();
+    if (this.styleEl) {
+      this.styleEl.remove();
+      this.styleEl = null;
+    }
   }
 
-  /* ---------------- Settings passthrough ---------------- */
-
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-  }
   async saveSettings() {
     await this.saveData(this.settings);
   }
 
-  public applyOrRemovePatches() {
-    this.controller.applyOrRemovePatches();
+  /** apply user colors -> CSS variables */
+  applyColors(): void {
+    const root = document.documentElement;
+    root.style.setProperty("--asc-saved-color", this.settings.savedColor);
+    root.style.setProperty("--asc-pending-color", this.settings.pendingColor);
   }
-  public updateTimeouts() {
-    this.controller.updateTimeouts?.();
-  }
-  public restoreOriginals() {
-    this.controller.restoreOriginals();
+
+  /** inject minimal CSS once */
+  private installStyle(): void {
+    if (this.styleEl) return;
+    const css = `
+      .save-status-icon.asc-saved   { color: var(--asc-saved-color,   #32cd32); }
+      .save-status-icon.asc-pending { color: var(--asc-pending-color, #00bfff); }
+    `;
+    const el = document.createElement("style");
+    el.setAttribute("data-asc", "styles");
+    el.textContent = css;
+    document.head.appendChild(el);
+    this.styleEl = el;
   }
 }
