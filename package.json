@@ -1,6 +1,6 @@
 {
 	"name": "autosave-control",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"description": "A plugin that allows setting a custom autosave interval.",
 	"main": "main.js",
 	"scripts": {
