@@ -7,18 +7,20 @@ This plugin changes how often Obsidian saves files to the disk.
 Instead of saving every two seconds from start of typing (Obsidian default), this plugin makes Obsidian wait for the user to finish with editing, and after the input stops, it waits for a defined time (by default 10 seconds) and then it only saves once.
 
 - This reduces sync conflicts with services like Dropbox, Google Drive, or Git.  
-- It makes working with large files or network drives smoother.  
+- It makes working with large files or network drives smoother.
+- It reduces power consumption when using Obsidian on battery-powered devices.
 
 ## Key Features
 
-- **Save Interval**: Choose how many seconds Obsidian should wait before saving (3–3600 seconds). Default is 10 seconds.  
+- **Save Interval**: Choose how many seconds Obsidian should wait before saving after last keystroke (3–3600 seconds). Default is 10 seconds.
 - **Smart Handling**:
-  - Keeps edits in memory and saves them after the chosen interval.  
-  - If you keep typing, the timer resets.
-  - Files are saved automatically when you switch, close, or quit Obsidian. 
+  - Keeps edits in memory and saves them after the chosen interval when you stop editing a file.
+  - Files are saved automatically when you switch, close, or quit Obsidian.
+  - Files can be saved regardless of timer using the default Save file shortcut.
 - **Status Icon**: A dot in the status bar shows save status:  
   - **Blue** → changes pending
   - **Green** → all saved
+  - Color picker included for personalized status icon colors!
 
 ## Installation
 
