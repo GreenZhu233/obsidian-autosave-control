@@ -89,7 +89,7 @@ export default class AutoSaveControlPlugin extends Plugin {
 type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
 const LOG = (...a: unknown[]) => dlog("[asc]", ...a);
 
-const INPUT_GRACE_MS = 2100; // allow Obsidian's autosave (~2s) once
+const INPUT_GRACE_MS = 2100; // allow Obsidian's autosave (~2s) once in this rolling-timeframe
 
 const windowsWithListeners = new WeakSet<Window>();
 
@@ -106,9 +106,9 @@ export class AutoSaveController {
   private token = new Map<string, number>();
 
   private onBeforeUnload?: () => void;
-  private onInput?: (ev: Event) => void;
-  private onPaste?: (ev: Event) => void;
-  private onCut?: (ev: Event) => void;
+  private onInput?: () => void;
+  private onPaste?: () => void;
+  private onCut?: () => void;
 
   constructor(app: App, settings: () => AutoSaveControlSettings) {
     this.app = app;
@@ -119,7 +119,7 @@ export class AutoSaveController {
     this.onPendingChange = cb;
   }
 
-  /** Wrap MarkdownView.save and attach minimal listeners */
+  /** Wrap save and attach all relevant listeners (main + popups) */
   apply() {
     if (this.origSave) return;
 
@@ -127,57 +127,58 @@ export class AutoSaveController {
     this.origSave = proto.save;
     proto.save = this.makeWrapper(proto.save);
 
-    // listeners
+    // mark function for all input events
+    const mark = () => this.markActiveFileInput(true);
+
+    // main window listeners
     this.onBeforeUnload = () => { this.unloading = true; };
     window.addEventListener("beforeunload", this.onBeforeUnload, { capture: true });
 
-    const mark = () => {
-      const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
-      const p = mv?.file?.path;
-      LOG("input made:"+p)
-      if (p) this.markInput(p);
-    };
+    this.onInput = mark;
+    this.onPaste = mark;
+    this.onCut = mark;
 
-    this.onInput = () => mark();
-    this.onPaste = () => mark();
-    this.onCut = () => mark();
+    window.addEventListener("input", this.onInput, true);
+    window.addEventListener("paste", this.onPaste, true);
+    window.addEventListener("cut", this.onCut, true);
 
+    // workspace leaf changes → apply listeners to popups
     this.app.workspace.on("active-leaf-change", (leaf) => {
-      LOG("leaf changed");
-      if(!leaf) return;
-      const view = leaf.view;
-      if (view instanceof MarkdownView) {
-        this.applyGlobalInputListeners();
-      }
+      if (!leaf || !(leaf.view instanceof MarkdownView)) return;
+      this.attachWindowListeners(activeWindow);
     });
 
-    LOG("wrapped save");
+    // initial attach to the main window
+    this.attachWindowListeners(window);
+
+    LOG("wrapped save and attached listeners");
   }
 
-  private applyGlobalInputListeners() {
-    LOG("applying global input listeners");
-    if (windowsWithListeners.has(activeWindow)) return; // already applied
+  /** Attach input listeners to a given window (main or popup) */
+  private attachWindowListeners(win: Window) {
+    if (windowsWithListeners.has(win)) return;
 
-    const mark = () => {
-      const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
-      const path = mv?.file?.path;
-      if (path) this.markInput(path);
+    const mark = () => this.markActiveFileInput(true);
+    const onKeydown = (ev: KeyboardEvent) => {
+      if (["Enter", "Backspace", "Delete"].includes(ev.key)) mark();
     };
 
-    const onInput = () => mark();
-    const onPaste = () => mark();
-    const onCut = () => mark();
+    win.addEventListener("keydown", onKeydown, true);
+    win.addEventListener("input", mark, true);
+    win.addEventListener("paste", mark, true);
+    win.addEventListener("cut", mark, true);
+    win.addEventListener("beforeunload", () => this.flushAllPending());
 
-    activeWindow.addEventListener("input", onInput, true);
-    activeWindow.addEventListener("paste", onPaste, true);
-    activeWindow.addEventListener("cut", onCut, true);
+    windowsWithListeners.add(win);
+  }
 
-    windowsWithListeners.add(activeWindow);
-
-    // flush all pending files when window is closing
-    activeWindow.addEventListener("beforeunload", () => {
-      this.flushAllPending();
-    });
+  /** Marks the currently active file as edited */
+  private markActiveFileInput(log = false) {
+    const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const path = mv?.file?.path;
+    if (!path) return;
+    GLOBAL_LAST_INPUT_AT.set(path, Date.now());
+    if (log) LOG("input made:", path);
   }
 
   private async flushAllPending() {
