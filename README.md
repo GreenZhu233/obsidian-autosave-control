@@ -14,9 +14,9 @@ Instead of repeatedly saving during an active editing burst, the plugin records 
 
 - **Save Delay**: Choose how many seconds Obsidian should wait after editing stops before saving (3-3600 seconds). Default is 10 seconds.
 - **Edit-Aware Saving**:
-  - Tracks edit activity and schedules a delayed save instead of saving on every Obsidian autosave tick.
-  - Flushes pending saves when you switch, close, or quit Obsidian.
-  - Still allows an immediate save when Obsidian performs a normal save outside the edit burst.
+  - Starts a delayed save timer from real edit activity and resets it while you keep typing.
+  - Keeps the timer in control when you switch tabs, switch Obsidian windows, or click into another app.
+  - Flushes pending saves when you close a note/window or quit Obsidian.
 - **Status Icon**: A dot in the status bar shows save state:
   - **Blue** → changes pending
   - **Green** → all saved
@@ -36,7 +36,10 @@ your-vault/.obsidian/plugins/autosave-control
 Once enabled, the plugin works automatically:
 
 - Just edit your notes as usual.  
+- The status dot turns blue as soon as a delayed save is pending.
 - The plugin waits until you pause editing, then saves after the configured delay.
+- Clicking away from Obsidian does not force an immediate save; the configured timer still decides when the write happens.
+- Switching to another note or tab also does not force an immediate save.
 - You can check the status dot in the bar (blue = waiting, green = saved).
 - Change the save delay under **Settings > Obsidian Autosave Control**.
 

@@ -1,17 +1,23 @@
-import { App, EventRef, MarkdownView, TextFileView } from "obsidian";
+import { App, EventRef, MarkdownView, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
 import { dlog } from "../debug";
 import type { AutoSaveControlSettings } from "../settings/AutoSaveSettings";
 import { EditActivityTracker } from "./EditActivityTracker";
 import { PendingSaveQueue } from "./PendingSaveQueue";
 
 type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
+type RequestSaveFn = (this: TextFileView, ...args: unknown[]) => void;
+type OpenFileFn = (this: WorkspaceLeaf, ...args: unknown[]) => Promise<unknown>;
+type OnUnloadFileFn = (this: TextFileView, file: TFile) => Promise<void>;
+type SetViewStateFn = (this: WorkspaceLeaf, ...args: unknown[]) => Promise<unknown>;
 
 type BeforeUnloadListener = () => void;
 
-const OBSIDIAN_AUTOSAVE_GRACE_MS = 2100;
-
 export class AutoSaveController {
   private originalSave: SaveFn | null = null;
+  private originalRequestSave: RequestSaveFn | null = null;
+  private originalOpenFile: OpenFileFn | null = null;
+  private originalOnUnloadFile: OnUnloadFileFn | null = null;
+  private originalSetViewState: SetViewStateFn | null = null;
   private isUnloading = false;
   private workspaceLeafChangeEventRef?: EventRef;
   private onPendingSaveCountChange?: (pendingSaveCount: number) => void;
@@ -19,10 +25,16 @@ export class AutoSaveController {
   private readonly editActivityTracker: EditActivityTracker;
   private readonly pendingSaveQueue: PendingSaveQueue;
   private readonly beforeUnloadListenersByWindow = new Map<Window, BeforeUnloadListener>();
+  private readonly fileSwitchingLeaves = new WeakSet<WorkspaceLeaf>();
+  private readonly filePathsSwitchingInLeaf = new Set<string>();
 
   constructor(private readonly app: App, private readonly getSettings: () => AutoSaveControlSettings) {
-    this.editActivityTracker = new EditActivityTracker(() => this.app.workspace.getActiveViewOfType(MarkdownView));
+    this.editActivityTracker = new EditActivityTracker(
+      () => this.app.workspace.getActiveViewOfType(MarkdownView),
+      (view, filePath) => this.pendingSaveQueue.schedule(filePath, view as unknown as TextFileView),
+    );
     this.pendingSaveQueue = new PendingSaveQueue(
+      this.app,
       () => this.getSettings().saveDelaySeconds,
       () => this.originalSave,
       (pendingSaveCount) => this.onPendingSaveCountChange?.(pendingSaveCount),
@@ -39,8 +51,29 @@ export class AutoSaveController {
     }
 
     const markdownViewPrototype = MarkdownView.prototype as unknown as { save: SaveFn };
+    const textFileViewPrototype = TextFileView.prototype as unknown as {
+      requestSave?: RequestSaveFn;
+      onUnloadFile: OnUnloadFileFn;
+    };
+    const workspaceLeafPrototype = WorkspaceLeaf.prototype as unknown as { openFile: OpenFileFn };
+    const workspaceLeafViewStatePrototype = WorkspaceLeaf.prototype as unknown as { setViewState: SetViewStateFn };
+
     this.originalSave = markdownViewPrototype.save;
     markdownViewPrototype.save = this.createSaveWrapper(markdownViewPrototype.save);
+
+    if (typeof textFileViewPrototype.requestSave === "function") {
+      this.originalRequestSave = textFileViewPrototype.requestSave;
+      textFileViewPrototype.requestSave = this.createRequestSaveWrapper(textFileViewPrototype.requestSave);
+    }
+
+    this.originalOnUnloadFile = textFileViewPrototype.onUnloadFile;
+    textFileViewPrototype.onUnloadFile = this.createOnUnloadFileWrapper(textFileViewPrototype.onUnloadFile);
+
+    this.originalOpenFile = workspaceLeafPrototype.openFile;
+    workspaceLeafPrototype.openFile = this.createOpenFileWrapper(workspaceLeafPrototype.openFile);
+
+    this.originalSetViewState = workspaceLeafViewStatePrototype.setViewState;
+    workspaceLeafViewStatePrototype.setViewState = this.createSetViewStateWrapper(workspaceLeafViewStatePrototype.setViewState);
 
     this.isUnloading = false;
     this.workspaceLeafChangeEventRef = this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -64,9 +97,36 @@ export class AutoSaveController {
 
   disable() {
     const markdownViewPrototype = MarkdownView.prototype as unknown as { save: SaveFn };
+    const textFileViewPrototype = TextFileView.prototype as unknown as {
+      requestSave?: RequestSaveFn;
+      onUnloadFile: OnUnloadFileFn;
+    };
+    const workspaceLeafPrototype = WorkspaceLeaf.prototype as unknown as { openFile: OpenFileFn };
+    const workspaceLeafViewStatePrototype = WorkspaceLeaf.prototype as unknown as { setViewState: SetViewStateFn };
+
     if (this.originalSave) {
       markdownViewPrototype.save = this.originalSave;
       this.originalSave = null;
+    }
+
+    if (this.originalRequestSave) {
+      textFileViewPrototype.requestSave = this.originalRequestSave;
+      this.originalRequestSave = null;
+    }
+
+    if (this.originalOnUnloadFile) {
+      textFileViewPrototype.onUnloadFile = this.originalOnUnloadFile;
+      this.originalOnUnloadFile = null;
+    }
+
+    if (this.originalOpenFile) {
+      workspaceLeafPrototype.openFile = this.originalOpenFile;
+      this.originalOpenFile = null;
+    }
+
+    if (this.originalSetViewState) {
+      workspaceLeafViewStatePrototype.setViewState = this.originalSetViewState;
+      this.originalSetViewState = null;
     }
 
     if (this.workspaceLeafChangeEventRef) {
@@ -89,35 +149,76 @@ export class AutoSaveController {
         return originalSave.apply(this, args);
       }
 
-      if (controller.isUnloading) {
-        controller.pendingSaveQueue.clear(filePath);
-        controller.pendingSaveQueue.clearGracePeriod(filePath);
-        return originalSave.apply(this, args);
+      if (controller.pendingSaveQueue.has(filePath)) {
+        dlog("Suppressing save while delayed timer is pending", { filePath, args });
+        return;
       }
 
-      const now = Date.now();
-      const lastEditActivityAt = controller.editActivityTracker.getLastEditActivityAt(filePath);
-      const millisecondsSinceLastEdit = now - lastEditActivityAt;
-      const isInsideObsidianAutosaveGracePeriod =
-        millisecondsSinceLastEdit >= 0 && millisecondsSinceLastEdit <= OBSIDIAN_AUTOSAVE_GRACE_MS;
+      return originalSave.apply(this, args);
+    };
+  }
 
-      dlog("Save called", { filePath, millisecondsSinceLastEdit });
+  private createOnUnloadFileWrapper(originalOnUnloadFile: OnUnloadFileFn): OnUnloadFileFn {
+    const controller = this;
 
-      if (!isInsideObsidianAutosaveGracePeriod) {
-        controller.pendingSaveQueue.clear(filePath);
-        controller.pendingSaveQueue.clearGracePeriod(filePath);
-        return originalSave.apply(this, args);
+    return async function wrappedOnUnloadFile(this: TextFileView, file: TFile) {
+      if (controller.pendingSaveQueue.has(file.path) && !controller.fileSwitchingLeaves.has(this.leaf)) {
+        dlog("Flushing pending save on file unload", { filePath: file.path });
+        await controller.pendingSaveQueue.flush(file.path);
       }
 
-      if (controller.pendingSaveQueue.isRepeatedSaveForSameEditBurst(filePath, now, lastEditActivityAt)) {
-        controller.pendingSaveQueue.clear(filePath);
-        controller.pendingSaveQueue.clearGracePeriod(filePath);
-        return originalSave.apply(this, args);
+      await originalOnUnloadFile.call(this, file);
+    };
+  }
+
+  private createRequestSaveWrapper(originalRequestSave: RequestSaveFn): RequestSaveFn {
+    const controller = this;
+
+    return function wrappedRequestSave(this: TextFileView, ...args: unknown[]) {
+      const filePath = this.file?.path;
+      if (!filePath) {
+        return originalRequestSave.apply(this, args);
       }
 
-      controller.pendingSaveQueue.schedule(filePath, this as TextFileView);
-      controller.pendingSaveQueue.setGracePeriod(filePath, lastEditActivityAt, OBSIDIAN_AUTOSAVE_GRACE_MS);
-      return;
+      controller.pendingSaveQueue.schedule(filePath, this);
+    };
+  }
+
+  private createOpenFileWrapper(originalOpenFile: OpenFileFn): OpenFileFn {
+    const controller = this;
+
+    return async function wrappedOpenFile(this: WorkspaceLeaf, ...args: unknown[]) {
+      const filePath = controller.getLeafMarkdownFilePath(this);
+
+      controller.fileSwitchingLeaves.add(this);
+      if (filePath) {
+        controller.filePathsSwitchingInLeaf.add(filePath);
+      }
+
+      try {
+        return await originalOpenFile.apply(this, args);
+      } finally {
+        controller.clearLeafSwitchingState(this, filePath);
+      }
+    };
+  }
+
+  private createSetViewStateWrapper(originalSetViewState: SetViewStateFn): SetViewStateFn {
+    const controller = this;
+
+    return async function wrappedSetViewState(this: WorkspaceLeaf, ...args: unknown[]) {
+      const filePath = controller.getLeafMarkdownFilePath(this);
+
+      controller.fileSwitchingLeaves.add(this);
+      if (filePath) {
+        controller.filePathsSwitchingInLeaf.add(filePath);
+      }
+
+      try {
+        return await originalSetViewState.apply(this, args);
+      } finally {
+        controller.clearLeafSwitchingState(this, filePath);
+      }
     };
   }
 
@@ -149,5 +250,23 @@ export class AutoSaveController {
 
   private getViewWindow(view: MarkdownView): Window | null {
     return view.containerEl.ownerDocument.defaultView;
+  }
+
+  private getLeafMarkdownFilePath(leaf: WorkspaceLeaf): string | null {
+    const view = leaf.view;
+    if (!(view instanceof MarkdownView)) {
+      return null;
+    }
+
+    return view.file?.path ?? null;
+  }
+
+  private clearLeafSwitchingState(leaf: WorkspaceLeaf, filePath: string | null) {
+    window.setTimeout(() => {
+      this.fileSwitchingLeaves.delete(leaf);
+      if (filePath) {
+        this.filePathsSwitchingInLeaf.delete(filePath);
+      }
+    }, 0);
   }
 }

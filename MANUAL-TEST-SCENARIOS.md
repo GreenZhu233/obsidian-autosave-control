@@ -10,15 +10,14 @@ Use a visible save delay while testing, preferably `5s` or `10s`.
 
 ## Core Delayed Save
 
-- [ ] Type normal letters continuously for longer than 2 seconds. Expected: no repeated disk saves while typing.
+- [ ] Type normal letters continuously for longer than 2 seconds. Expected: status dot turns pending quickly and no disk save happens until you stop typing and the full configured delay expires.
 - [ ] Stop typing and wait for the configured delay. Expected: exactly one save after the delay.
 - [ ] Type, pause briefly, then type again before the delay finishes. Expected: timer resets and save happens only after the last pause.
 - [ ] Leave the note idle without changes. Expected: no extra saves.
-- [ ] While changes are pending, use Obsidian's normal manual save shortcut. Expected: file saves immediately.
 
 ## Special Input Cases
 
-- [ ] Press `Enter` repeatedly. Expected: delayed save still works; no immediate fallback autosaves.
+- [ ] Press `Enter` repeatedly. Expected: status dot turns pending and delayed save still works; no immediate fallback autosaves.
 - [ ] Press `Backspace` repeatedly. Expected: delayed save still works.
 - [ ] Press `Delete` repeatedly. Expected: delayed save still works.
 - [ ] Press `Space` repeatedly. Expected: delayed save still works.
@@ -38,11 +37,12 @@ Use a visible save delay while testing, preferably `5s` or `10s`.
 - [ ] Edit a note, then close its tab. Expected: pending changes are saved.
 - [ ] Edit a note, then close Obsidian normally. Expected: pending changes are saved.
 - [ ] Edit a note in one Obsidian window, then focus another Obsidian window. Expected: window switch does not force an immediate save.
+- [ ] Edit a note, then click into a different app before the delay finishes. Expected: switching away from Obsidian does not force a save; the configured timer still decides when the file is written.
 - [ ] Disable or reload the plugin while nothing is pending. Expected: editor keeps working normally.
 
 ## Status Indicator
 
-- [ ] Start editing. Expected: status dot changes to the pending status color and tooltip says changes are pending.
+- [ ] Start editing. Expected: status dot changes to the pending status color soon after the first edit and tooltip says changes are pending.
 - [ ] Wait for autosave to complete. Expected: status dot changes back to the saved status color and tooltip says all changes saved.
 - [ ] Edit two files with pending timers. Expected: indicator stays pending until both are saved.
 
@@ -60,4 +60,5 @@ Use a visible save delay while testing, preferably `5s` or `10s`.
 - [ ] No case should leave the status dot green while there are clearly unsaved edits.
 - [ ] Separate-window editing must not fall back to Obsidian's default rapid autosave behavior.
 - [ ] `Enter`, `Backspace`, and `Delete` must count as input for the timer.
+- [ ] First edit in a note must reliably turn the status dot pending.
 - [ ] Tab switch and window switch must not force save, but tab close, window close, and app quit still must save.

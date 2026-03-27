@@ -5,6 +5,7 @@ export interface SettingsHost {
   settings: AutoSaveControlSettings;
   saveSettings(): Promise<void>;
   applyStatusColors(): void;
+  applyStatusIconSize(): void;
 }
 
 export class AutoSaveControlSettingsTab extends PluginSettingTab {
@@ -58,6 +59,27 @@ export class AutoSaveControlSettingsTab extends PluginSettingTab {
         this.host.applyStatusColors();
       },
     });
+
+    new Setting(containerEl)
+      .setName("Status icon size (px)")
+      .setDesc(`Size of the status bar dot in pixels (${MIN_STATUS_ICON_SIZE_PX}-${MAX_STATUS_ICON_SIZE_PX}).`)
+      .addText((textComponent) =>
+        textComponent
+          .setValue(String(this.host.settings.statusIconSizePx))
+          .onChange(async (value) => {
+            const parsedValue = Number.parseInt(value, 10);
+            const normalizedValue = Number.isNaN(parsedValue)
+              ? DEFAULT_STATUS_ICON_SIZE_PX
+              : Math.max(
+                  MIN_STATUS_ICON_SIZE_PX,
+                  Math.min(MAX_STATUS_ICON_SIZE_PX, parsedValue)
+                );
+
+            this.host.settings.statusIconSizePx = normalizedValue;
+            await this.host.saveSettings();
+            this.host.applyStatusIconSize();
+          })
+      );
   }
 
   private addColorSetting(options: ColorSettingOptions) {
@@ -90,3 +112,6 @@ type ColorSettingOptions = {
 const DEFAULT_SAVE_DELAY_SECONDS = 10;
 const MIN_SAVE_DELAY_SECONDS = 3;
 const MAX_SAVE_DELAY_SECONDS = 3600;
+const DEFAULT_STATUS_ICON_SIZE_PX = 16;
+const MIN_STATUS_ICON_SIZE_PX = 8;
+const MAX_STATUS_ICON_SIZE_PX = 32;

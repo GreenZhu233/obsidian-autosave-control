@@ -5,7 +5,10 @@ export class EditActivityTracker {
   private readonly lastEditActivityAtByPath = new Map<string, number>();
   private readonly listenersByWindow = new Map<Window, EditActivityWindowListeners>();
 
-  constructor(private readonly getActiveMarkdownView: () => MarkdownView | null) {}
+  constructor(
+    private readonly getActiveMarkdownView: () => MarkdownView | null,
+    private readonly onEditActivity?: (view: MarkdownView, filePath: string) => void,
+  ) {}
 
   attachToWindow(targetWindow: Window | null | undefined) {
     if (!targetWindow || this.listenersByWindow.has(targetWindow)) {
@@ -58,6 +61,7 @@ export class EditActivityTracker {
     }
 
     this.lastEditActivityAtByPath.set(filePath, Date.now());
+    this.onEditActivity?.(activeMarkdownView, filePath);
 
     if (shouldLog) {
       dlog("Edit activity", filePath);

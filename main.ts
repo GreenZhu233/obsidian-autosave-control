@@ -26,6 +26,7 @@ export default class AutoSaveControlPlugin extends Plugin {
 
     this.installStyles();
     this.applyStatusColors();
+    this.applyStatusIconSize();
 
     this.addSettingTab(new AutoSaveControlSettingsTab(this.app, this));
   }
@@ -47,6 +48,13 @@ export default class AutoSaveControlPlugin extends Plugin {
     const rootElement = document.documentElement;
     rootElement.style.setProperty("--asc-saved-color", this.settings.savedStatusColor);
     rootElement.style.setProperty("--asc-pending-color", this.settings.pendingStatusColor);
+  }
+
+  applyStatusIconSize(): void {
+    document.documentElement.style.setProperty(
+      "--asc-icon-size",
+      `${this.settings.statusIconSizePx}px`
+    );
   }
 
   private installStyles(): void {

@@ -1,4 +1,4 @@
-import { MarkdownView, TextFileView } from "obsidian";
+import { App, MarkdownView, TextFileView, TFile } from "obsidian";
 import { dlog } from "../debug";
 
 type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
@@ -6,14 +6,14 @@ type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
 type PendingSaveEntry = {
   view: TextFileView;
   timeoutId: number;
+  latestData: string;
 };
 
 export class PendingSaveQueue {
   private readonly pendingSavesByPath = new Map<string, PendingSaveEntry>();
-  private readonly gracePeriodEndsAtByPath = new Map<string, number>();
-  private readonly gracePeriodEditActivityAtByPath = new Map<string, number>();
 
   constructor(
+    private readonly app: App,
     private readonly getSaveDelaySeconds: () => number,
     private readonly getOriginalSave: () => SaveFn | null,
     private readonly onPendingSaveCountChange: (pendingSaveCount: number) => void,
@@ -34,8 +34,12 @@ export class PendingSaveQueue {
       void this.flush(filePath);
     }, saveDelayMilliseconds);
 
-    this.pendingSavesByPath.set(filePath, { view, timeoutId });
+    this.pendingSavesByPath.set(filePath, { view, timeoutId, latestData: view.getViewData() });
     this.emitPendingSaveCount();
+  }
+
+  has(filePath: string): boolean {
+    return this.pendingSavesByPath.has(filePath);
   }
 
   clear(filePath: string) {
@@ -60,8 +64,15 @@ export class PendingSaveQueue {
     this.pendingSavesByPath.delete(filePath);
     this.emitPendingSaveCount();
 
-    await originalSave.call(pendingSave.view as unknown as MarkdownView);
-    this.clearGracePeriod(filePath);
+    const activeViewFilePath = pendingSave.view.file?.path;
+    if (activeViewFilePath === filePath) {
+      await originalSave.call(pendingSave.view as unknown as MarkdownView);
+    } else {
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (file instanceof TFile) {
+        await this.app.vault.modify(file, pendingSave.latestData);
+      }
+    }
 
     dlog("Pending save flushed", filePath);
   }
@@ -70,22 +81,6 @@ export class PendingSaveQueue {
     for (const filePath of Array.from(this.pendingSavesByPath.keys())) {
       await this.flush(filePath);
     }
-  }
-
-  setGracePeriod(filePath: string, lastEditActivityAt: number, gracePeriodMilliseconds: number) {
-    this.gracePeriodEndsAtByPath.set(filePath, lastEditActivityAt + gracePeriodMilliseconds);
-    this.gracePeriodEditActivityAtByPath.set(filePath, lastEditActivityAt);
-  }
-
-  isRepeatedSaveForSameEditBurst(filePath: string, now: number, lastEditActivityAt: number): boolean {
-    const gracePeriodEndsAt = this.gracePeriodEndsAtByPath.get(filePath) ?? 0;
-    const gracePeriodEditActivityAt = this.gracePeriodEditActivityAtByPath.get(filePath);
-    return now <= gracePeriodEndsAt && gracePeriodEditActivityAt === lastEditActivityAt;
-  }
-
-  clearGracePeriod(filePath: string) {
-    this.gracePeriodEndsAtByPath.delete(filePath);
-    this.gracePeriodEditActivityAtByPath.delete(filePath);
   }
 
   private emitPendingSaveCount() {
