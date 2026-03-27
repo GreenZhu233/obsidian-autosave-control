@@ -14,6 +14,7 @@ Use a visible save delay while testing, preferably `5s` or `10s`.
 - [ ] Stop typing and wait for the configured delay. Expected: exactly one save after the delay.
 - [ ] Type, pause briefly, then type again before the delay finishes. Expected: timer resets and save happens only after the last pause.
 - [ ] Leave the note idle without changes. Expected: no extra saves.
+- [ ] While changes are pending, use Obsidian's current Save File shortcut. Expected: file saves immediately and the status dot returns to saved.
 
 ## Special Input Cases
 

@@ -17,6 +17,7 @@ Instead of repeatedly saving during an active editing burst, the plugin records 
   - Starts a delayed save timer from real edit activity and resets it while you keep typing.
   - Keeps the timer in control when you switch tabs, switch Obsidian windows, or click into another app.
   - Flushes pending saves when you close a note/window or quit Obsidian.
+  - Respects Obsidian's current Save File shortcut and saves immediately when you trigger it manually.
 - **Status Icon**: A dot in the status bar shows save state:
   - **Blue** → changes pending
   - **Green** → all saved

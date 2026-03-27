@@ -1,4 +1,4 @@
-import { App, EventRef, MarkdownView, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
+import { App, EventRef, Hotkey, MarkdownView, Platform, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
 import { dlog } from "../debug";
 import type { AutoSaveControlSettings } from "../settings/AutoSaveSettings";
 import { EditActivityTracker } from "./EditActivityTracker";
@@ -20,6 +20,7 @@ export class AutoSaveController {
   private originalSetViewState: SetViewStateFn | null = null;
   private isUnloading = false;
   private workspaceLeafChangeEventRef?: EventRef;
+  private vaultRenameEventRef?: EventRef;
   private onPendingSaveCountChange?: (pendingSaveCount: number) => void;
 
   private readonly editActivityTracker: EditActivityTracker;
@@ -32,6 +33,8 @@ export class AutoSaveController {
     this.editActivityTracker = new EditActivityTracker(
       () => this.app.workspace.getActiveViewOfType(MarkdownView),
       (view, filePath) => this.pendingSaveQueue.schedule(filePath, view as unknown as TextFileView),
+      (event) => this.isManualSaveShortcut(event),
+      (view, filePath, event) => this.handleManualSaveShortcut(view, filePath, event),
     );
     this.pendingSaveQueue = new PendingSaveQueue(
       this.app,
@@ -76,6 +79,15 @@ export class AutoSaveController {
     workspaceLeafViewStatePrototype.setViewState = this.createSetViewStateWrapper(workspaceLeafViewStatePrototype.setViewState);
 
     this.isUnloading = false;
+    this.vaultRenameEventRef = this.app.vault.on("rename", (file, oldPath) => {
+      if (!(file instanceof TFile)) {
+        return;
+      }
+
+      this.pendingSaveQueue.renamePendingSave(oldPath, file.path);
+      this.editActivityTracker.renameTrackedFile(oldPath, file.path);
+    });
+
     this.workspaceLeafChangeEventRef = this.app.workspace.on("active-leaf-change", (leaf) => {
       if (!leaf || !(leaf.view instanceof MarkdownView)) {
         return;
@@ -132,6 +144,11 @@ export class AutoSaveController {
     if (this.workspaceLeafChangeEventRef) {
       this.app.workspace.offref(this.workspaceLeafChangeEventRef);
       this.workspaceLeafChangeEventRef = undefined;
+    }
+
+    if (this.vaultRenameEventRef) {
+      this.app.vault.offref(this.vaultRenameEventRef);
+      this.vaultRenameEventRef = undefined;
     }
 
     this.detachAllWindowObservers();
@@ -268,5 +285,61 @@ export class AutoSaveController {
         this.filePathsSwitchingInLeaf.delete(filePath);
       }
     }, 0);
+  }
+
+  private isManualSaveShortcut(event: KeyboardEvent): boolean {
+    return this.getSaveHotkeys().some((hotkey) => this.matchesHotkey(event, hotkey));
+  }
+
+  private handleManualSaveShortcut(view: MarkdownView, filePath: string, event: KeyboardEvent): boolean {
+    if (!this.pendingSaveQueue.has(filePath)) {
+      return false;
+    }
+
+    dlog("Flushing pending save from manual save shortcut", { filePath });
+    event.preventDefault();
+    event.stopPropagation();
+    void this.pendingSaveQueue.flush(filePath);
+    return true;
+  }
+
+  private getSaveHotkeys(): Hotkey[] {
+    const appWithInternals = this.app as App & {
+      hotkeyManager?: { customKeys?: Record<string, Hotkey[]> };
+      commands?: { commands?: Record<string, { hotkeys?: Hotkey[] }> };
+    };
+
+    const commandId = "editor:save-file";
+    const customHotkeys = appWithInternals.hotkeyManager?.customKeys?.[commandId];
+    if (customHotkeys && customHotkeys.length > 0) {
+      return customHotkeys;
+    }
+
+    const defaultHotkeys = appWithInternals.commands?.commands?.[commandId]?.hotkeys;
+    if (defaultHotkeys && defaultHotkeys.length > 0) {
+      return defaultHotkeys;
+    }
+
+    return [{ modifiers: ["Mod"], key: "s" }];
+  }
+
+  private matchesHotkey(event: KeyboardEvent, hotkey: Hotkey): boolean {
+    if (event.key.toLowerCase() !== hotkey.key.toLowerCase()) {
+      return false;
+    }
+
+    const normalizedModifiers = new Set(hotkey.modifiers);
+    const expectsMod = normalizedModifiers.has("Mod");
+    const expectsCtrl = normalizedModifiers.has("Ctrl") || (!Platform.isMacOS && expectsMod);
+    const expectsMeta = normalizedModifiers.has("Meta") || (Platform.isMacOS && expectsMod);
+    const expectsShift = normalizedModifiers.has("Shift");
+    const expectsAlt = normalizedModifiers.has("Alt");
+
+    return (
+      event.ctrlKey === expectsCtrl &&
+      event.metaKey === expectsMeta &&
+      event.shiftKey === expectsShift &&
+      event.altKey === expectsAlt
+    );
   }
 }

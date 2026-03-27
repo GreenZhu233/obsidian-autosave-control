@@ -42,6 +42,23 @@ export class PendingSaveQueue {
     return this.pendingSavesByPath.has(filePath);
   }
 
+  renamePendingSave(oldPath: string, newPath: string) {
+    const pendingSave = this.pendingSavesByPath.get(oldPath);
+    if (!pendingSave) {
+      return;
+    }
+
+    clearTimeout(pendingSave.timeoutId);
+
+    const saveDelayMilliseconds = this.getSaveDelaySeconds() * 1000;
+    const timeoutId = window.setTimeout(() => {
+      void this.flush(newPath);
+    }, saveDelayMilliseconds);
+
+    this.pendingSavesByPath.delete(oldPath);
+    this.pendingSavesByPath.set(newPath, { ...pendingSave, timeoutId });
+  }
+
   clear(filePath: string) {
     const pendingSave = this.pendingSavesByPath.get(filePath);
     if (!pendingSave) {

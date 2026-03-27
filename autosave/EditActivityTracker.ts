@@ -8,6 +8,8 @@ export class EditActivityTracker {
   constructor(
     private readonly getActiveMarkdownView: () => MarkdownView | null,
     private readonly onEditActivity?: (view: MarkdownView, filePath: string) => void,
+    private readonly isManualSaveShortcut?: (event: KeyboardEvent) => boolean,
+    private readonly onManualSaveShortcut?: (view: MarkdownView, filePath: string, event: KeyboardEvent) => boolean,
   ) {}
 
   attachToWindow(targetWindow: Window | null | undefined) {
@@ -17,6 +19,10 @@ export class EditActivityTracker {
 
     const recordEditActivity = () => this.recordActiveFileEditActivity(true);
     const onKeydown = (event: KeyboardEvent) => {
+      if (this.handleManualSaveShortcut(event)) {
+        return;
+      }
+
       if (["Enter", "Backspace", "Delete"].includes(event.key)) {
         recordEditActivity();
       }
@@ -50,6 +56,30 @@ export class EditActivityTracker {
 
   getLastEditActivityAt(filePath: string): number {
     return this.lastEditActivityAtByPath.get(filePath) ?? 0;
+  }
+
+  renameTrackedFile(oldPath: string, newPath: string) {
+    const lastEditActivityAt = this.lastEditActivityAtByPath.get(oldPath);
+    if (lastEditActivityAt === undefined) {
+      return;
+    }
+
+    this.lastEditActivityAtByPath.delete(oldPath);
+    this.lastEditActivityAtByPath.set(newPath, lastEditActivityAt);
+  }
+
+  private handleManualSaveShortcut(event: KeyboardEvent): boolean {
+    if (!this.isManualSaveShortcut?.(event)) {
+      return false;
+    }
+
+    const activeMarkdownView = this.getActiveMarkdownView();
+    const filePath = activeMarkdownView?.file?.path;
+    if (!activeMarkdownView || !filePath) {
+      return false;
+    }
+
+    return this.onManualSaveShortcut?.(activeMarkdownView, filePath, event) ?? false;
   }
 
   private recordActiveFileEditActivity(shouldLog = false) {
