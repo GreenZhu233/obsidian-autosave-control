@@ -3,7 +3,7 @@
   "name": "Autosave Control",
   "version": "0.0.7",
   "minAppVersion": "0.15.0",
-  "description": "A plugin that allows setting a custom autosave interval.",
+  "description": "Delay autosave until editing has stopped for a chosen number of seconds.",
   "author": "Miha Smrekar",
   "authorUrl": "https://github.com/mihasm/",
   "isDesktopOnly": false

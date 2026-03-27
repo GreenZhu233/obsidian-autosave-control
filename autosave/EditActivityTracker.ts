@@ -1,0 +1,73 @@
+import { MarkdownView } from "obsidian";
+import { dlog } from "../debug";
+
+export class EditActivityTracker {
+  private readonly lastEditActivityAtByPath = new Map<string, number>();
+  private readonly listenersByWindow = new Map<Window, EditActivityWindowListeners>();
+
+  constructor(private readonly getActiveMarkdownView: () => MarkdownView | null) {}
+
+  attachToWindow(targetWindow: Window | null | undefined) {
+    if (!targetWindow || this.listenersByWindow.has(targetWindow)) {
+      return;
+    }
+
+    const recordEditActivity = () => this.recordActiveFileEditActivity(true);
+    const onKeydown = (event: KeyboardEvent) => {
+      if (["Enter", "Backspace", "Delete"].includes(event.key)) {
+        recordEditActivity();
+      }
+    };
+
+    const listeners: EditActivityWindowListeners = {
+      keydown: onKeydown,
+      input: recordEditActivity,
+      paste: recordEditActivity,
+      cut: recordEditActivity,
+    };
+
+    targetWindow.addEventListener("keydown", listeners.keydown, true);
+    targetWindow.addEventListener("input", listeners.input, true);
+    targetWindow.addEventListener("paste", listeners.paste, true);
+    targetWindow.addEventListener("cut", listeners.cut, true);
+
+    this.listenersByWindow.set(targetWindow, listeners);
+  }
+
+  detachAll() {
+    for (const [targetWindow, listeners] of this.listenersByWindow.entries()) {
+      targetWindow.removeEventListener("keydown", listeners.keydown, true);
+      targetWindow.removeEventListener("input", listeners.input, true);
+      targetWindow.removeEventListener("paste", listeners.paste, true);
+      targetWindow.removeEventListener("cut", listeners.cut, true);
+    }
+
+    this.listenersByWindow.clear();
+  }
+
+  getLastEditActivityAt(filePath: string): number {
+    return this.lastEditActivityAtByPath.get(filePath) ?? 0;
+  }
+
+  private recordActiveFileEditActivity(shouldLog = false) {
+    const activeMarkdownView = this.getActiveMarkdownView();
+    const filePath = activeMarkdownView?.file?.path;
+
+    if (!filePath) {
+      return;
+    }
+
+    this.lastEditActivityAtByPath.set(filePath, Date.now());
+
+    if (shouldLog) {
+      dlog("Edit activity", filePath);
+    }
+  }
+}
+
+type EditActivityWindowListeners = {
+  keydown: (event: KeyboardEvent) => void;
+  input: () => void;
+  paste: () => void;
+  cut: () => void;
+};

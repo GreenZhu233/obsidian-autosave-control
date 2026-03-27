@@ -2,9 +2,9 @@
 
 ## What It Does
 
-This plugin changes how often Obsidian saves files to the disk.  
+This plugin delays Obsidian's automatic disk writes until editing has stopped for a chosen amount of time.
 
-Instead of saving every two seconds from start of typing (Obsidian default), this plugin makes Obsidian wait for the user to finish with editing, and after the input stops, it waits for a defined time (by default 10 seconds) and then it only saves once.
+Instead of repeatedly saving during an active editing burst, the plugin records edit activity, waits for you to pause, and then performs one save after the configured delay. The default delay is 10 seconds.
 
 - This reduces sync conflicts with services like Dropbox, Google Drive, or Git.  
 - It makes working with large files or network drives smoother.
@@ -12,12 +12,12 @@ Instead of saving every two seconds from start of typing (Obsidian default), thi
 
 ## Key Features
 
-- **Save Interval**: Choose how many seconds Obsidian should wait before saving after last keystroke (3–3600 seconds). Default is 10 seconds.
-- **Smart Handling**:
-  - Keeps edits in memory and saves them after the chosen interval when you stop editing a file.
-  - Files are saved automatically when you switch, close, or quit Obsidian.
-  - Files can be saved regardless of timer using the default Save file shortcut.
-- **Status Icon**: A dot in the status bar shows save status:  
+- **Save Delay**: Choose how many seconds Obsidian should wait after editing stops before saving (3-3600 seconds). Default is 10 seconds.
+- **Edit-Aware Saving**:
+  - Tracks edit activity and schedules a delayed save instead of saving on every Obsidian autosave tick.
+  - Flushes pending saves when you switch, close, or quit Obsidian.
+  - Still allows an immediate save when Obsidian performs a normal save outside the edit burst.
+- **Status Icon**: A dot in the status bar shows save state:
   - **Blue** → changes pending
   - **Green** → all saved
   - Color picker included for personalized status icon colors!
@@ -36,14 +36,14 @@ your-vault/.obsidian/plugins/autosave-control
 Once enabled, the plugin works automatically:
 
 - Just edit your notes as usual.  
-- The plugin waits until you pause typing, then saves.  
+- The plugin waits until you pause editing, then saves after the configured delay.
 - You can check the status dot in the bar (blue = waiting, green = saved).
-- Change the save interval under **Settings > Obsidian Autosave Control**.  
+- Change the save delay under **Settings > Obsidian Autosave Control**.
 
 ## Important Notes
 
-- Unsaved changes are kept in memory during the wait. If Obsidian or your computer crashes, those pending edits may be lost.  
-- Choose a save interval that balances fewer saves with your comfort level.  
+- Unsaved changes are kept in memory during the wait. If Obsidian or your computer crashes, those pending edits may be lost.
+- Choose a save delay that balances fewer writes with your comfort level.
 
 ## Development
 

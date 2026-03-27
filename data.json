@@ -1,5 +1,5 @@
 {
-  "saveInterval": 10,
-  "savedColor": "#00ffaa",
-  "pendingColor": "#ff0000"
+  "saveDelaySeconds": 10,
+  "savedStatusColor": "#00ffaa",
+  "pendingStatusColor": "#ff0000"
 }

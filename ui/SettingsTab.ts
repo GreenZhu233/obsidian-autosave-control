@@ -1,16 +1,15 @@
-// src/ui/SettingsTab.ts
-import { PluginSettingTab, Setting, App } from "obsidian";
-import type { AutoSaveControlSettings } from "../main";
+import { App, ColorComponent, PluginSettingTab, Setting } from "obsidian";
+import type { AutoSaveControlSettings } from "../settings/AutoSaveSettings";
 
 export interface SettingsHost {
   settings: AutoSaveControlSettings;
   saveSettings(): Promise<void>;
-  applyColors(): void; // NEW
+  applyStatusColors(): void;
 }
 
-export class AutoSaveControlSettingTab extends PluginSettingTab {
-  constructor(app: App, private host: SettingsHost) {
-    super(app, host as any);
+export class AutoSaveControlSettingsTab extends PluginSettingTab {
+  constructor(app: App, private readonly host: SettingsHost) {
+    super(app, host as never);
   }
 
   display(): void {
@@ -20,58 +19,74 @@ export class AutoSaveControlSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Autosave Control" });
 
     new Setting(containerEl)
-      .setName("Save interval (seconds)")
-      .setDesc("Delay before autosave is written (3–3600).")
-      .addText((t) =>
-        t
-          .setValue(String(this.host.settings.saveInterval))
-          .onChange(async (val) => {
-            let n = parseInt(val, 10);
-            if (isNaN(n)) n = 10;
-            n = Math.max(3, Math.min(3600, n));
-            this.host.settings.saveInterval = n;
+      .setName("Save delay (seconds)")
+      .setDesc("How long to wait after editing stops before saving (3-3600).")
+      .addText((textComponent) =>
+        textComponent
+          .setValue(String(this.host.settings.saveDelaySeconds))
+          .onChange(async (value) => {
+            const parsedValue = Number.parseInt(value, 10);
+            const normalizedValue = Number.isNaN(parsedValue)
+              ? DEFAULT_SAVE_DELAY_SECONDS
+              : Math.max(MIN_SAVE_DELAY_SECONDS, Math.min(MAX_SAVE_DELAY_SECONDS, parsedValue));
+
+            this.host.settings.saveDelaySeconds = normalizedValue;
             await this.host.saveSettings();
           })
       );
 
-    new Setting(containerEl)
-      .setName("Saved color")
-      .setDesc("Status dot color when all changes are saved.")
-      .addColorPicker?.((p) =>
-        p.setValue(this.host.settings.savedColor).onChange(async (v) => {
-          this.host.settings.savedColor = v;
-          await this.host.saveSettings();
-          this.host.applyColors();
-        })
-      ) ?? // fallback if addColorPicker is not available
-      new Setting(containerEl)
-        .setName("Saved color (hex)")
-        .addText((t) =>
-          t.setValue(this.host.settings.savedColor).onChange(async (v) => {
-            this.host.settings.savedColor = v;
-            await this.host.saveSettings();
-            this.host.applyColors();
-          })
-        );
+    this.addColorSetting({
+      containerEl,
+      name: "Saved status color",
+      description: "Status dot color when all changes are saved.",
+      getValue: () => this.host.settings.savedStatusColor,
+      setValue: async (value) => {
+        this.host.settings.savedStatusColor = value;
+        await this.host.saveSettings();
+        this.host.applyStatusColors();
+      },
+    });
 
-    new Setting(containerEl)
-      .setName("Pending color")
-      .setDesc("Status dot color when saves are pending.")
-      .addColorPicker?.((p) =>
-        p.setValue(this.host.settings.pendingColor).onChange(async (v) => {
-          this.host.settings.pendingColor = v;
-          await this.host.saveSettings();
-          this.host.applyColors();
-        })
-      ) ?? // fallback
-      new Setting(containerEl)
-        .setName("Pending color (hex)")
-        .addText((t) =>
-          t.setValue(this.host.settings.pendingColor).onChange(async (v) => {
-            this.host.settings.pendingColor = v;
-            await this.host.saveSettings();
-            this.host.applyColors();
-          })
-        );
+    this.addColorSetting({
+      containerEl,
+      name: "Pending status color",
+      description: "Status dot color while a delayed save is waiting.",
+      getValue: () => this.host.settings.pendingStatusColor,
+      setValue: async (value) => {
+        this.host.settings.pendingStatusColor = value;
+        await this.host.saveSettings();
+        this.host.applyStatusColors();
+      },
+    });
+  }
+
+  private addColorSetting(options: ColorSettingOptions) {
+    const setting = new Setting(options.containerEl)
+      .setName(options.name)
+      .setDesc(options.description);
+
+    const addColorPicker = setting.addColorPicker;
+    if (addColorPicker) {
+      addColorPicker.call(setting, (colorPicker: ColorComponent) =>
+        colorPicker.setValue(options.getValue()).onChange(options.setValue)
+      );
+      return;
+    }
+
+    setting.addText((textComponent) =>
+      textComponent.setValue(options.getValue()).onChange(options.setValue)
+    );
   }
 }
+
+type ColorSettingOptions = {
+  containerEl: HTMLElement;
+  name: string;
+  description: string;
+  getValue: () => string;
+  setValue: (value: string) => Promise<void>;
+};
+
+const DEFAULT_SAVE_DELAY_SECONDS = 10;
+const MIN_SAVE_DELAY_SECONDS = 3;
+const MAX_SAVE_DELAY_SECONDS = 3600;

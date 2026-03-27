@@ -1,7 +1,7 @@
 {
 	"name": "autosave-control",
 	"version": "0.0.7",
-	"description": "A plugin that allows setting a custom autosave interval.",
+	"description": "Delay autosave until editing has stopped for a chosen number of seconds.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
