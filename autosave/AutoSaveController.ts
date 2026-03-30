@@ -22,6 +22,7 @@ export class AutoSaveController {
   private originalDetach: DetachFn | null = null;
   private isUnloading = false;
   private workspaceLeafChangeEventRef?: EventRef;
+  private workspaceQuitEventRef?: EventRef;
   private vaultRenameEventRef?: EventRef;
   private onPendingSaveCountChange?: (pendingSaveCount: number) => void;
 
@@ -47,6 +48,7 @@ export class AutoSaveController {
       () => this.getSettings().disableAutoSave,
       () => this.getSettings().saveDelaySeconds,
       () => this.originalSave,
+      () => this.isUnloading,
       (pendingSaveCount) => this.onPendingSaveCountChange?.(pendingSaveCount),
     );
   }
@@ -113,6 +115,10 @@ export class AutoSaveController {
       this.attachWindowObservers(this.getViewWindow(leaf.view));
     });
 
+    this.workspaceQuitEventRef = this.app.workspace.on("quit", () => {
+      this.isUnloading = true;
+    });
+
     this.attachWindowObservers(window);
 
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
@@ -175,6 +181,11 @@ export class AutoSaveController {
     if (this.vaultRenameEventRef) {
       this.app.vault.offref(this.vaultRenameEventRef);
       this.vaultRenameEventRef = undefined;
+    }
+
+    if (this.workspaceQuitEventRef) {
+      this.app.workspace.offref(this.workspaceQuitEventRef);
+      this.workspaceQuitEventRef = undefined;
     }
 
     this.detachAllWindowObservers();
@@ -346,12 +357,7 @@ export class AutoSaveController {
     this.quitShortcutListenersByWindow.set(targetWindow, quitShortcutListener);
 
     const beforeUnload = () => {
-      if (this.getSettings().disableAutoSave) {
-        return;
-      }
-
       this.isUnloading = true;
-      void this.pendingSaveQueue.flushAll();
     };
 
     const beforeUnloadWithPrompt = (event: BeforeUnloadEvent) => {
@@ -421,18 +427,16 @@ export class AutoSaveController {
       return;
     }
 
-    event.preventDefault();
-    event.stopPropagation();
-
     const shouldDiscardUnsavedChanges = targetWindow.confirm(
       "You have unsaved changes. Quit Obsidian and discard those changes?"
     );
     if (!shouldDiscardUnsavedChanges) {
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
 
     this.discardAllPendingChanges();
-    this.executeQuitCommand(targetWindow);
   }
 
   private discardAllPendingChanges(): void {
@@ -572,17 +576,6 @@ export class AutoSaveController {
     }
 
     return [{ modifiers: ["Mod"], key: "q" }];
-  }
-
-  private executeQuitCommand(targetWindow: Window): void {
-    const appWithInternals = this.app as App & {
-      commands?: { executeCommandById?: (commandId: string) => boolean };
-    };
-
-    const didExecuteQuit = appWithInternals.commands?.executeCommandById?.("app:quit");
-    if (!didExecuteQuit) {
-      targetWindow.close();
-    }
   }
 
   private matchesHotkey(event: KeyboardEvent, hotkey: Hotkey): boolean {

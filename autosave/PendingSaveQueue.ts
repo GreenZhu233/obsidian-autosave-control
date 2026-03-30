@@ -17,6 +17,7 @@ export class PendingSaveQueue {
     private readonly isAutoSaveDisabled: () => boolean,
     private readonly getSaveDelaySeconds: () => number,
     private readonly getOriginalSave: () => SaveFn | null,
+    private readonly shouldWriteDirectlyToVault: () => boolean,
     private readonly onPendingSaveCountChange: (pendingSaveCount: number) => void,
   ) {}
 
@@ -99,15 +100,18 @@ export class PendingSaveQueue {
     this.pendingSavesByPath.delete(filePath);
     this.emitPendingSaveCount();
 
-    const activeViewFilePath = pendingSave.view.file?.path;
-    if (activeViewFilePath === filePath) {
-      await originalSave.call(pendingSave.view as unknown as MarkdownView);
-    } else {
-      const file = this.app.vault.getAbstractFileByPath(filePath);
-      if (file instanceof TFile) {
-        await this.app.vault.modify(file, pendingSave.latestData);
-      }
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) {
+      return;
     }
+
+    const activeViewFilePath = pendingSave.view.file?.path;
+    if (!this.shouldWriteDirectlyToVault() && activeViewFilePath === filePath) {
+      await originalSave.call(pendingSave.view as unknown as MarkdownView);
+      return;
+    }
+
+    await this.app.vault.modify(file, pendingSave.latestData);
 
     dlog("Pending save flushed", filePath);
   }
