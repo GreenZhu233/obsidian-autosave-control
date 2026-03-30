@@ -1,72 +1,41 @@
 # Obsidian Autosave Control
 
-## Overview
-
 This plugin gives you full control over how Obsidian.md saves your notes.
 
 By default, Obsidian saves every ~2 seconds while you type. While convenient, this behavior can cause issues such as:
 
-- Sync conflicts with cloud storage (e.g. Proton Drive)
+- Sync conflicts with cloud storage (e.g. Google Drive, Dropbox, Proton Drive, ...)
 - Performance problems with large files
 - Issues when working on network drives
 - Increased battery usage
 
 This plugin allows you to change that behavior.
 
----
-
 ## Modes
 
 ### 1. Delayed Autosave
 
 - You type normally.
-- The save timer resets on every change.
-- Obsidian saves **once**, only after you stop editing for the configured delay.
+- The save timer resets on every edit (per file).
+- Obsidian saves **once**, only after you stop editing for the configured delay (by default 10 seconds).
 
 This reduces unnecessary writes and avoids constant file updates.
-
----
 
 ### 2. Autosave Disabled
 
 - No automatic saving occurs.
 - Files are saved **only** when you manually trigger a save.
-
-Important behavior:
-
 - You must use the **Save File** command (assign a hotkey if needed).
 - Closing a note or quitting Obsidian with unsaved changes will show a warning.
-
----
-
-## Default vs Plugin Behavior
-
-### Default Obsidian
-
-- Saves continuously (every ~2 seconds while typing)
-
-### Delayed Mode
-
-- Saves once after you stop typing
-- Timer resets on every keystroke
-
-### Disabled Mode
-
-- No autosave at all
-- Manual save only
-
----
 
 ## Status Indicator
 
 The plugin shows save state in the status bar:
 
-- 🔵 Blue — Unsaved changes pending  
-- 🟢 Green — All changes saved  
+🔵 Blue — Unsaved changes pending  
+🟢 Green — All changes saved  
 
-Colors can be customized in settings.
-
----
+Colors and the size of the icon can be customized in settings.
 
 ## Settings
 
@@ -81,21 +50,17 @@ Colors can be customized in settings.
 - Hides the delay setting
 - Requires manual saves
 
----
+### Saved status color
 
-## When to Use Each Mode
+- Status dot color when all changes are saved.
 
-**Delayed Autosave**
-- Recommended for most users
-- Best for use with cloud sync services
-- Reduces file churn and sync conflicts
+### Pending status color
 
-**Autosave Disabled**
-- For advanced users
-- Useful in controlled environments or when working with sensitive workflows
-- Requires disciplined manual saving
+- Status dot color while changes are not saved.
 
----
+### Status icon size
+
+- Size of the status bar dot in pixels.
 
 ## Installation
 
@@ -109,21 +74,15 @@ Colors can be customized in settings.
 - Open **Settings → Community Plugins**
 - Enable the plugin
 
----
-
 ## Important Notes
 
 - Unsaved changes are kept in memory until written to disk.
 - If Obsidian or your system crashes before saving, changes may be lost.
 - This plugin reduces disk writes, but does **not** provide backup functionality.
 
----
-
 ## How It Works
 
 The plugin intercepts editor change events and delays or suppresses save operations using a debounced save mechanism.
-
----
 
 ## License
 
