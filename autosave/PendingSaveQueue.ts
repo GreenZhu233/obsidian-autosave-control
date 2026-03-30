@@ -5,7 +5,7 @@ type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
 
 type PendingSaveEntry = {
   view: TextFileView;
-  timeoutId: number;
+  timeoutId: number | null;
   latestData: string;
 };
 
@@ -14,6 +14,7 @@ export class PendingSaveQueue {
 
   constructor(
     private readonly app: App,
+    private readonly isAutoSaveDisabled: () => boolean,
     private readonly getSaveDelaySeconds: () => number,
     private readonly getOriginalSave: () => SaveFn | null,
     private readonly onPendingSaveCountChange: (pendingSaveCount: number) => void,
@@ -25,21 +26,24 @@ export class PendingSaveQueue {
     }
 
     const existingPendingSave = this.pendingSavesByPath.get(filePath);
-    if (existingPendingSave) {
+    if (existingPendingSave?.timeoutId != null) {
       clearTimeout(existingPendingSave.timeoutId);
     }
 
-    const saveDelayMilliseconds = this.getSaveDelaySeconds() * 1000;
-    const timeoutId = window.setTimeout(() => {
-      void this.flush(filePath);
-    }, saveDelayMilliseconds);
-
-    this.pendingSavesByPath.set(filePath, { view, timeoutId, latestData: view.getViewData() });
+    this.pendingSavesByPath.set(filePath, {
+      view,
+      timeoutId: this.createTimeout(filePath),
+      latestData: view.getViewData(),
+    });
     this.emitPendingSaveCount();
   }
 
   has(filePath: string): boolean {
     return this.pendingSavesByPath.has(filePath);
+  }
+
+  hasAny(): boolean {
+    return this.pendingSavesByPath.size > 0;
   }
 
   renamePendingSave(oldPath: string, newPath: string) {
@@ -48,15 +52,25 @@ export class PendingSaveQueue {
       return;
     }
 
-    clearTimeout(pendingSave.timeoutId);
-
-    const saveDelayMilliseconds = this.getSaveDelaySeconds() * 1000;
-    const timeoutId = window.setTimeout(() => {
-      void this.flush(newPath);
-    }, saveDelayMilliseconds);
+    if (pendingSave.timeoutId !== null) {
+      clearTimeout(pendingSave.timeoutId);
+    }
 
     this.pendingSavesByPath.delete(oldPath);
-    this.pendingSavesByPath.set(newPath, { ...pendingSave, timeoutId });
+    this.pendingSavesByPath.set(newPath, {
+      ...pendingSave,
+      timeoutId: this.createTimeout(newPath),
+    });
+  }
+
+  refreshScheduling() {
+    for (const [filePath, pendingSave] of this.pendingSavesByPath.entries()) {
+      if (pendingSave.timeoutId !== null) {
+        clearTimeout(pendingSave.timeoutId);
+      }
+
+      pendingSave.timeoutId = this.createTimeout(filePath);
+    }
   }
 
   clear(filePath: string) {
@@ -65,7 +79,9 @@ export class PendingSaveQueue {
       return;
     }
 
-    clearTimeout(pendingSave.timeoutId);
+    if (pendingSave.timeoutId !== null) {
+      clearTimeout(pendingSave.timeoutId);
+    }
     this.pendingSavesByPath.delete(filePath);
     this.emitPendingSaveCount();
   }
@@ -77,7 +93,9 @@ export class PendingSaveQueue {
       return;
     }
 
-    clearTimeout(pendingSave.timeoutId);
+    if (pendingSave.timeoutId !== null) {
+      clearTimeout(pendingSave.timeoutId);
+    }
     this.pendingSavesByPath.delete(filePath);
     this.emitPendingSaveCount();
 
@@ -102,5 +120,16 @@ export class PendingSaveQueue {
 
   private emitPendingSaveCount() {
     this.onPendingSaveCountChange(this.pendingSavesByPath.size);
+  }
+
+  private createTimeout(filePath: string): number | null {
+    if (this.isAutoSaveDisabled()) {
+      return null;
+    }
+
+    const saveDelayMilliseconds = this.getSaveDelaySeconds() * 1000;
+    return window.setTimeout(() => {
+      void this.flush(filePath);
+    }, saveDelayMilliseconds);
   }
 }

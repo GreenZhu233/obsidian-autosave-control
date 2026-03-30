@@ -49,6 +49,11 @@ Use a visible save delay while testing, preferably `5s` or `10s`.
 
 ## Settings
 
+- [ ] Enable "Disable autosave completely". Expected: save delay setting disappears and a warning about fully disabled automatic saves is shown.
+- [ ] With complete autosave disablement enabled, edit a note. Expected: status dot turns pending and stays pending until you use Obsidian's Save File shortcut.
+- [ ] With complete autosave disablement enabled and pending changes present, close Obsidian. Expected: a confirmation prompt warns that unsaved changes will be discarded.
+- [ ] With complete autosave disablement enabled and pending changes present, cancel the close prompt. Expected: Obsidian stays open and no automatic save is written.
+- [ ] Re-enable delayed autosave while changes are pending from complete autosave disablement mode. Expected: pending changes move back onto the configured timer.
 - [ ] Change save delay to another valid value. Expected: next pending save uses the new delay.
 - [ ] Enter values below `3` and above `3600`. Expected: setting is clamped to the allowed range.
 - [ ] Enter a non-numeric delay. Expected: plugin falls back to a valid number and keeps working.
@@ -63,3 +68,4 @@ Use a visible save delay while testing, preferably `5s` or `10s`.
 - [ ] `Enter`, `Backspace`, and `Delete` must count as input for the timer.
 - [ ] First edit in a note must reliably turn the status dot pending.
 - [ ] Tab switch and window switch must not force save, but tab close, window close, and app quit still must save.
+- [ ] A plugin-triggered save before any typing in the note must still be blocked when the note is dirty.

@@ -20,6 +20,26 @@ export class AutoSaveControlSettingsTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Autosave Control" });
 
     new Setting(containerEl)
+      .setName("Disable autosave completely")
+      .setDesc("Only save when you trigger Obsidian's Save File command manually.")
+      .addToggle((toggleComponent) =>
+        toggleComponent.setValue(this.host.settings.disableAutoSave).onChange(async (value) => {
+          this.host.settings.disableAutoSave = value;
+          await this.host.saveSettings();
+          this.display();
+        })
+      );
+
+    if (this.host.settings.disableAutoSave) {
+      new Setting(containerEl)
+        .setName("Warning")
+        .setDesc(
+          "Automatic saves are fully disabled. Unsaved changes stay only in memory until you use Obsidian's Save File command. Closing Obsidian with pending changes will show a confirmation prompt."
+        );
+    }
+
+    if (!this.host.settings.disableAutoSave) {
+    new Setting(containerEl)
       .setName("Save delay (seconds)")
       .setDesc("How long to wait after editing stops before saving (3-3600).")
       .addText((textComponent) =>
@@ -35,6 +55,7 @@ export class AutoSaveControlSettingsTab extends PluginSettingTab {
             await this.host.saveSettings();
           })
       );
+    }
 
     this.addColorSetting({
       containerEl,

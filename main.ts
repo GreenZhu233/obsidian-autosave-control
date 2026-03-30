@@ -42,6 +42,7 @@ export default class AutoSaveControlPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    this.autosaveController.refreshScheduling();
   }
 
   applyStatusColors(): void {
