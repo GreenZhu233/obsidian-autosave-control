@@ -10,6 +10,8 @@ type OpenFileFn = (this: WorkspaceLeaf, ...args: unknown[]) => Promise<unknown>;
 type OnUnloadFileFn = (this: TextFileView, file: TFile) => Promise<void>;
 type SetViewStateFn = (this: WorkspaceLeaf, ...args: unknown[]) => Promise<unknown>;
 type DetachFn = (this: WorkspaceLeaf) => void;
+type SaveCommandCheckCallback = (checking: boolean) => boolean | void;
+const MANUAL_SAVE_REQUEST_TTL_MS = 5000;
 
 type BeforeUnloadListener = (event: BeforeUnloadEvent) => void;
 
@@ -20,6 +22,7 @@ export class AutoSaveController {
   private originalOnUnloadFile: OnUnloadFileFn | null = null;
   private originalSetViewState: SetViewStateFn | null = null;
   private originalDetach: DetachFn | null = null;
+  private originalSaveCommandCheckCallback: SaveCommandCheckCallback | null = null;
   private isUnloading = false;
   private workspaceLeafChangeEventRef?: EventRef;
   private workspaceQuitEventRef?: EventRef;
@@ -97,6 +100,8 @@ export class AutoSaveController {
     this.originalDetach = workspaceLeafViewStatePrototype.detach;
     workspaceLeafViewStatePrototype.detach = this.createDetachWrapper(workspaceLeafViewStatePrototype.detach);
 
+    this.wrapSaveCommand();
+
     this.isUnloading = false;
     this.vaultRenameEventRef = this.app.vault.on("rename", (file, oldPath) => {
       if (!(file instanceof TFile)) {
@@ -173,6 +178,8 @@ export class AutoSaveController {
       this.originalDetach = null;
     }
 
+    this.restoreSaveCommand();
+
     if (this.workspaceLeafChangeEventRef) {
       this.app.workspace.offref(this.workspaceLeafChangeEventRef);
       this.workspaceLeafChangeEventRef = undefined;
@@ -215,10 +222,12 @@ export class AutoSaveController {
 
         if (saveResult instanceof Promise) {
           return saveResult.then(() => {
+            controller.pendingSaveQueue.clear(filePath);
             controller.captureCurrentViewData(filePath, this as unknown as TextFileView);
           });
         }
 
+        controller.pendingSaveQueue.clear(filePath);
         controller.captureCurrentViewData(filePath, this as unknown as TextFileView);
         return saveResult;
       }
@@ -268,6 +277,12 @@ export class AutoSaveController {
       if (controller.discardedFilePaths.has(filePath)) {
         dlog("Suppressing requestSave for discarded file", { filePath, args });
         return;
+      }
+
+      if (controller.hasManualSaveRequest(filePath)) {
+        dlog("Allowing manual requestSave", { filePath, args });
+        controller.markManualSaveRequested(filePath);
+        return originalRequestSave.apply(this, args);
       }
 
       controller.pendingSaveQueue.schedule(filePath, this);
@@ -480,16 +495,11 @@ export class AutoSaveController {
 
   private handleManualSaveShortcut(view: MarkdownView, filePath: string, event: KeyboardEvent): boolean {
     this.markManualSaveRequested(filePath);
-
-    if (!this.pendingSaveQueue.has(filePath)) {
-      return false;
-    }
-
-    dlog("Flushing pending save from manual save shortcut", { filePath });
-    event.preventDefault();
-    event.stopPropagation();
-    void this.pendingSaveQueue.flush(filePath);
-    return true;
+    dlog("Allowing manual save shortcut to continue through Obsidian save command", {
+      filePath,
+      key: event.key,
+    });
+    return false;
   }
 
   private shouldHoldSave(view: MarkdownView, filePath: string): boolean {
@@ -514,7 +524,7 @@ export class AutoSaveController {
 
     const timeoutId = window.setTimeout(() => {
       this.manualSaveRequestTimeoutsByPath.delete(filePath);
-    }, 1000);
+    }, MANUAL_SAVE_REQUEST_TTL_MS);
 
     this.manualSaveRequestTimeoutsByPath.set(filePath, timeoutId);
   }
@@ -530,12 +540,63 @@ export class AutoSaveController {
     return true;
   }
 
+  private hasManualSaveRequest(filePath: string): boolean {
+    return this.manualSaveRequestTimeoutsByPath.has(filePath);
+  }
+
   private clearManualSaveRequests(): void {
     for (const timeoutId of this.manualSaveRequestTimeoutsByPath.values()) {
       window.clearTimeout(timeoutId);
     }
 
     this.manualSaveRequestTimeoutsByPath.clear();
+  }
+
+  private wrapSaveCommand(): void {
+    const controller = this;
+    const saveCommandDefinition = this.getSaveCommandDefinition();
+    if (!saveCommandDefinition || typeof saveCommandDefinition.checkCallback !== "function") {
+      return;
+    }
+
+    const checkCallback = saveCommandDefinition.checkCallback;
+    this.originalSaveCommandCheckCallback = checkCallback;
+    saveCommandDefinition.checkCallback = function (this: unknown, checking: boolean) {
+      if (!checking) {
+        controller.markActiveFileManualSaveRequested();
+      }
+
+      return checkCallback.call(this, checking);
+    };
+  }
+
+  private restoreSaveCommand(): void {
+    const saveCommandDefinition = this.getSaveCommandDefinition();
+    if (!saveCommandDefinition || !this.originalSaveCommandCheckCallback) {
+      this.originalSaveCommandCheckCallback = null;
+      return;
+    }
+
+    saveCommandDefinition.checkCallback = this.originalSaveCommandCheckCallback;
+    this.originalSaveCommandCheckCallback = null;
+  }
+
+  private markActiveFileManualSaveRequested(): void {
+    const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const filePath = activeMarkdownView?.file?.path;
+    if (!filePath) {
+      return;
+    }
+
+    this.markManualSaveRequested(filePath);
+  }
+
+  private getSaveCommandDefinition(): { checkCallback?: SaveCommandCheckCallback } | null {
+    const appWithInternals = this.app as App & {
+      commands?: { commands?: Record<string, { checkCallback?: SaveCommandCheckCallback }> };
+    };
+
+    return appWithInternals.commands?.commands?.["editor:save-file"] ?? null;
   }
 
   private getSaveHotkeys(): Hotkey[] {
