@@ -47,6 +47,19 @@ export class PendingSaveQueue {
     return this.pendingSavesByPath.size > 0;
   }
 
+  getLatestData(filePath: string): string | null {
+    return this.pendingSavesByPath.get(filePath)?.latestData ?? null;
+  }
+
+  touchView(filePath: string, view: TextFileView) {
+    const pendingSave = this.pendingSavesByPath.get(filePath);
+    if (!pendingSave) {
+      return;
+    }
+
+    pendingSave.view = view;
+  }
+
   renamePendingSave(oldPath: string, newPath: string) {
     const pendingSave = this.pendingSavesByPath.get(oldPath);
     if (!pendingSave) {
@@ -106,7 +119,11 @@ export class PendingSaveQueue {
     }
 
     const activeViewFilePath = pendingSave.view.file?.path;
-    if (!this.shouldWriteDirectlyToVault() && activeViewFilePath === filePath) {
+    const activeViewData = pendingSave.view.getViewData?.();
+    const hasMatchingActiveViewData =
+      typeof activeViewData === "string" && activeViewData === pendingSave.latestData;
+
+    if (!this.shouldWriteDirectlyToVault() && activeViewFilePath === filePath && hasMatchingActiveViewData) {
       await originalSave.call(pendingSave.view as unknown as MarkdownView);
       return;
     }

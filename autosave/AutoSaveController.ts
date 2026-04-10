@@ -34,7 +34,7 @@ export class AutoSaveController {
   private readonly beforeUnloadListenersByWindow = new Map<Window, BeforeUnloadListener>();
   private readonly quitShortcutListenersByWindow = new Map<Window, (event: KeyboardEvent) => void>();
   private readonly fileSwitchingLeaves = new WeakSet<WorkspaceLeaf>();
-  private readonly filePathsSwitchingInLeaf = new Set<string>();
+  private readonly pendingRestoreCountsByPath = new Map<string, number>();
   private readonly manualSaveRequestTimeoutsByPath = new Map<string, number>();
   private readonly discardedFilePaths = new Set<string>();
   private readonly lastSavedDataByPath = new Map<string, string>();
@@ -42,7 +42,13 @@ export class AutoSaveController {
   constructor(private readonly app: App, private readonly getSettings: () => AutoSaveControlSettings) {
     this.editActivityTracker = new EditActivityTracker(
       () => this.app.workspace.getActiveViewOfType(MarkdownView),
-      (view, filePath) => this.pendingSaveQueue.schedule(filePath, view as unknown as TextFileView),
+      (view, filePath) => {
+        if (this.isRestoringPendingData(filePath)) {
+          return;
+        }
+
+        this.pendingSaveQueue.schedule(filePath, view as unknown as TextFileView);
+      },
       (event) => this.isManualSaveShortcut(event),
       (view, filePath, event) => this.handleManualSaveShortcut(view, filePath, event),
     );
@@ -122,6 +128,9 @@ export class AutoSaveController {
 
     this.workspaceQuitEventRef = this.app.workspace.on("quit", () => {
       this.isUnloading = true;
+      if (!this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
+        void this.pendingSaveQueue.flushAll();
+      }
     });
 
     this.attachWindowObservers(window);
@@ -279,6 +288,11 @@ export class AutoSaveController {
         return;
       }
 
+      if (controller.isRestoringPendingData(filePath)) {
+        dlog("Suppressing requestSave during pending-data restore", { filePath, args });
+        return;
+      }
+
       if (controller.hasManualSaveRequest(filePath)) {
         dlog("Allowing manual requestSave", { filePath, args });
         controller.markManualSaveRequested(filePath);
@@ -293,18 +307,14 @@ export class AutoSaveController {
     const controller = this;
 
     return async function wrappedOpenFile(this: WorkspaceLeaf, ...args: unknown[]) {
-      const filePath = controller.getLeafMarkdownFilePath(this);
-
       controller.fileSwitchingLeaves.add(this);
-      if (filePath) {
-        controller.filePathsSwitchingInLeaf.add(filePath);
-      }
 
       try {
         return await originalOpenFile.apply(this, args);
       } finally {
         void controller.captureLeafSavedData(this);
-        controller.clearLeafSwitchingState(this, filePath);
+        controller.schedulePendingDataRestoreInLeaf(this);
+        controller.clearLeafSwitchingState(this);
       }
     };
   }
@@ -313,18 +323,14 @@ export class AutoSaveController {
     const controller = this;
 
     return async function wrappedSetViewState(this: WorkspaceLeaf, ...args: unknown[]) {
-      const filePath = controller.getLeafMarkdownFilePath(this);
-
       controller.fileSwitchingLeaves.add(this);
-      if (filePath) {
-        controller.filePathsSwitchingInLeaf.add(filePath);
-      }
 
       try {
         return await originalSetViewState.apply(this, args);
       } finally {
         void controller.captureLeafSavedData(this);
-        controller.clearLeafSwitchingState(this, filePath);
+        controller.schedulePendingDataRestoreInLeaf(this);
+        controller.clearLeafSwitchingState(this);
       }
     };
   }
@@ -382,6 +388,10 @@ export class AutoSaveController {
         return;
       }
 
+      if (!this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
+        void this.pendingSaveQueue.flushAll();
+      }
+
       beforeUnload();
     };
 
@@ -437,6 +447,43 @@ export class AutoSaveController {
     textFileView.data = savedData;
   }
 
+  private restorePendingDataIntoLeaf(view: TextFileView & { data?: string }, filePath: string): void {
+    if (this.isUnloading) {
+      return;
+    }
+
+    const pendingData = this.pendingSaveQueue.getLatestData(filePath);
+    if (pendingData === null) {
+      return;
+    }
+
+    this.markPendingDataRestoreStarted(filePath);
+
+    view.setViewData(pendingData, false);
+    view.data = pendingData;
+    this.pendingSaveQueue.touchView(filePath, view);
+    this.markPendingDataRestoreFinished(filePath);
+  }
+
+  private schedulePendingDataRestoreInLeaf(leaf: WorkspaceLeaf): void {
+    window.setTimeout(() => {
+      if (this.isUnloading) {
+        return;
+      }
+
+      const filePath = this.getLeafMarkdownFilePath(leaf);
+      if (!filePath || !this.pendingSaveQueue.has(filePath)) {
+        return;
+      }
+
+      if (!(leaf.view instanceof MarkdownView)) {
+        return;
+      }
+
+      this.restorePendingDataIntoLeaf(leaf.view as unknown as TextFileView & { data?: string }, filePath);
+    }, 0);
+  }
+
   private handleQuitShortcut(targetWindow: Window, event: KeyboardEvent): void {
     if (!this.getSettings().disableAutoSave || !this.pendingSaveQueue.hasAny() || !this.isQuitShortcut(event)) {
       return;
@@ -476,12 +523,33 @@ export class AutoSaveController {
     return view.file?.path ?? null;
   }
 
-  private clearLeafSwitchingState(leaf: WorkspaceLeaf, filePath: string | null) {
+  private clearLeafSwitchingState(leaf: WorkspaceLeaf) {
     window.setTimeout(() => {
       this.fileSwitchingLeaves.delete(leaf);
-      if (filePath) {
-        this.filePathsSwitchingInLeaf.delete(filePath);
+    }, 0);
+  }
+
+  private isRestoringPendingData(filePath: string): boolean {
+    return (this.pendingRestoreCountsByPath.get(filePath) ?? 0) > 0;
+  }
+
+  private markPendingDataRestoreStarted(filePath: string): void {
+    this.pendingRestoreCountsByPath.set(filePath, (this.pendingRestoreCountsByPath.get(filePath) ?? 0) + 1);
+  }
+
+  private markPendingDataRestoreFinished(filePath: string): void {
+    window.setTimeout(() => {
+      const pendingRestoreCount = this.pendingRestoreCountsByPath.get(filePath);
+      if (pendingRestoreCount === undefined) {
+        return;
       }
+
+      if (pendingRestoreCount <= 1) {
+        this.pendingRestoreCountsByPath.delete(filePath);
+        return;
+      }
+
+      this.pendingRestoreCountsByPath.set(filePath, pendingRestoreCount - 1);
     }, 0);
   }
 
@@ -493,7 +561,7 @@ export class AutoSaveController {
     return this.getQuitHotkeys().some((hotkey) => this.matchesHotkey(event, hotkey));
   }
 
-  private handleManualSaveShortcut(view: MarkdownView, filePath: string, event: KeyboardEvent): boolean {
+  private handleManualSaveShortcut(_view: MarkdownView, filePath: string, event: KeyboardEvent): boolean {
     this.markManualSaveRequested(filePath);
     dlog("Allowing manual save shortcut to continue through Obsidian save command", {
       filePath,
