@@ -67,7 +67,9 @@ Colors and the size of the icon can be customized in settings.
 1. Download the latest release from GitHub:  
    https://github.com/mihasm/obsidian-autosave-control/releases
 
-2. Extract the `.zip` file
+   Please download **obsidian-autosave-control.zip**, not the source code.
+
+2. Extract the `.zip` file. It should contain a main.js file and manifest.json file.
 
 3. Copy the contents into: `your-vault/.obsidian/plugins/autosave-control`.
 4. In Obsidian:
@@ -78,11 +80,6 @@ Colors and the size of the icon can be customized in settings.
 
 - Unsaved changes are kept in memory until written to disk.
 - If Obsidian or your system crashes before saving, changes may be lost.
-- This plugin reduces disk writes, but does **not** provide backup functionality.
-
-## How It Works
-
-The plugin intercepts editor change events and delays or suppresses save operations using a debounced save mechanism.
 
 ## License
 
