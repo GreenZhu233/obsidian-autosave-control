@@ -128,6 +128,7 @@ export class AutoSaveController {
 
     this.workspaceQuitEventRef = this.app.workspace.on("quit", () => {
       this.isUnloading = true;
+      this.pendingSaveQueue.refreshAllLatestData();
       if (!this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
         void this.pendingSaveQueue.flushAll();
       }
@@ -206,6 +207,7 @@ export class AutoSaveController {
 
     this.detachAllWindowObservers();
     this.clearManualSaveRequests();
+    this.pendingSaveQueue.clearAll();
     this.isUnloading = false;
 
     dlog("Autosave wrapper disabled");
@@ -260,6 +262,8 @@ export class AutoSaveController {
         return;
       }
 
+      controller.syncPendingDataForFile(file.path);
+
       if (controller.getSettings().disableAutoSave) {
         await originalOnUnloadFile.call(this, file);
         return;
@@ -307,6 +311,7 @@ export class AutoSaveController {
     const controller = this;
 
     return async function wrappedOpenFile(this: WorkspaceLeaf, ...args: unknown[]) {
+      controller.syncLeafPendingData(this);
       controller.fileSwitchingLeaves.add(this);
 
       try {
@@ -323,6 +328,7 @@ export class AutoSaveController {
     const controller = this;
 
     return async function wrappedSetViewState(this: WorkspaceLeaf, ...args: unknown[]) {
+      controller.syncLeafPendingData(this);
       controller.fileSwitchingLeaves.add(this);
 
       try {
@@ -340,6 +346,10 @@ export class AutoSaveController {
 
     return function wrappedDetach(this: WorkspaceLeaf) {
       const filePath = controller.getLeafMarkdownFilePath(this);
+      if (filePath) {
+        controller.syncPendingDataForFile(filePath);
+      }
+
       if (
         filePath &&
         controller.getSettings().disableAutoSave &&
@@ -382,6 +392,8 @@ export class AutoSaveController {
     };
 
     const beforeUnloadWithPrompt = (event: BeforeUnloadEvent) => {
+      this.pendingSaveQueue.refreshAllLatestData();
+
       if (this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
         event.preventDefault();
         event.returnValue = "You have unsaved changes. Closing Obsidian now will discard them.";
@@ -436,6 +448,19 @@ export class AutoSaveController {
     this.lastSavedDataByPath.set(filePath, view.getViewData());
   }
 
+  private syncPendingDataForFile(filePath: string): void {
+    this.pendingSaveQueue.refreshLatestData(filePath);
+  }
+
+  private syncLeafPendingData(leaf: WorkspaceLeaf): void {
+    const filePath = this.getLeafMarkdownFilePath(leaf);
+    if (!filePath) {
+      return;
+    }
+
+    this.syncPendingDataForFile(filePath);
+  }
+
   private restoreSavedDataIntoLeaf(leaf: WorkspaceLeaf, filePath: string): void {
     const savedData = this.lastSavedDataByPath.get(filePath);
     if (savedData === undefined) {
@@ -488,6 +513,8 @@ export class AutoSaveController {
     if (!this.getSettings().disableAutoSave || !this.pendingSaveQueue.hasAny() || !this.isQuitShortcut(event)) {
       return;
     }
+
+    this.pendingSaveQueue.refreshAllLatestData();
 
     const shouldDiscardUnsavedChanges = targetWindow.confirm(
       "You have unsaved changes. Quit Obsidian and discard those changes?"

@@ -2,10 +2,12 @@ import { App, MarkdownView, TextFileView, TFile } from "obsidian";
 import { dlog } from "../debug";
 
 type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
+const PENDING_RAM_REFRESH_INTERVAL_MS = 2000;
 
 type PendingSaveEntry = {
   view: TextFileView;
   timeoutId: number | null;
+  ramRefreshIntervalId: number | null;
   latestData: string;
 };
 
@@ -27,15 +29,29 @@ export class PendingSaveQueue {
     }
 
     const existingPendingSave = this.pendingSavesByPath.get(filePath);
-    if (existingPendingSave?.timeoutId != null) {
-      clearTimeout(existingPendingSave.timeoutId);
+    if (existingPendingSave) {
+      existingPendingSave.view = view;
+
+      if (existingPendingSave.timeoutId != null) {
+        clearTimeout(existingPendingSave.timeoutId);
+      }
+
+      existingPendingSave.timeoutId = this.createTimeout(filePath);
+      if (existingPendingSave.ramRefreshIntervalId === null) {
+        existingPendingSave.ramRefreshIntervalId = this.createRamRefreshInterval(filePath);
+      }
+      this.refreshLatestData(filePath);
+      this.emitPendingSaveCount();
+      return;
     }
 
     this.pendingSavesByPath.set(filePath, {
       view,
       timeoutId: this.createTimeout(filePath),
+      ramRefreshIntervalId: this.createRamRefreshInterval(filePath),
       latestData: view.getViewData(),
     });
+    this.refreshLatestData(filePath);
     this.emitPendingSaveCount();
   }
 
@@ -51,6 +67,28 @@ export class PendingSaveQueue {
     return this.pendingSavesByPath.get(filePath)?.latestData ?? null;
   }
 
+  refreshLatestData(filePath: string): boolean {
+    const pendingSave = this.pendingSavesByPath.get(filePath);
+    if (!pendingSave) {
+      return false;
+    }
+
+    const latestViewData = this.getPendingViewData(filePath, pendingSave);
+    if (latestViewData === null || latestViewData === pendingSave.latestData) {
+      return false;
+    }
+
+    pendingSave.latestData = latestViewData;
+    dlog("Pending save RAM snapshot refreshed", filePath);
+    return true;
+  }
+
+  refreshAllLatestData() {
+    for (const filePath of this.pendingSavesByPath.keys()) {
+      this.refreshLatestData(filePath);
+    }
+  }
+
   touchView(filePath: string, view: TextFileView) {
     const pendingSave = this.pendingSavesByPath.get(filePath);
     if (!pendingSave) {
@@ -58,6 +96,7 @@ export class PendingSaveQueue {
     }
 
     pendingSave.view = view;
+    this.refreshLatestData(filePath);
   }
 
   renamePendingSave(oldPath: string, newPath: string) {
@@ -96,8 +135,17 @@ export class PendingSaveQueue {
     if (pendingSave.timeoutId !== null) {
       clearTimeout(pendingSave.timeoutId);
     }
+    if (pendingSave.ramRefreshIntervalId !== null) {
+      clearInterval(pendingSave.ramRefreshIntervalId);
+    }
     this.pendingSavesByPath.delete(filePath);
     this.emitPendingSaveCount();
+  }
+
+  clearAll() {
+    for (const filePath of Array.from(this.pendingSavesByPath.keys())) {
+      this.clear(filePath);
+    }
   }
 
   async flush(filePath: string) {
@@ -110,6 +158,11 @@ export class PendingSaveQueue {
     if (pendingSave.timeoutId !== null) {
       clearTimeout(pendingSave.timeoutId);
     }
+    if (pendingSave.ramRefreshIntervalId !== null) {
+      clearInterval(pendingSave.ramRefreshIntervalId);
+    }
+
+    this.refreshLatestData(filePath);
     this.pendingSavesByPath.delete(filePath);
     this.emitPendingSaveCount();
 
@@ -118,12 +171,8 @@ export class PendingSaveQueue {
       return;
     }
 
-    const activeViewFilePath = pendingSave.view.file?.path;
-    const activeViewData = pendingSave.view.getViewData?.();
-    const hasMatchingActiveViewData =
-      typeof activeViewData === "string" && activeViewData === pendingSave.latestData;
-
-    if (!this.shouldWriteDirectlyToVault() && activeViewFilePath === filePath && hasMatchingActiveViewData) {
+    const attachedViewFilePath = pendingSave.view.file?.path;
+    if (!this.shouldWriteDirectlyToVault() && attachedViewFilePath === filePath) {
       await originalSave.call(pendingSave.view as unknown as MarkdownView);
       return;
     }
@@ -134,6 +183,8 @@ export class PendingSaveQueue {
   }
 
   async flushAll() {
+    this.refreshAllLatestData();
+
     for (const filePath of Array.from(this.pendingSavesByPath.keys())) {
       await this.flush(filePath);
     }
@@ -152,5 +203,20 @@ export class PendingSaveQueue {
     return window.setTimeout(() => {
       void this.flush(filePath);
     }, saveDelayMilliseconds);
+  }
+
+  private createRamRefreshInterval(filePath: string): number {
+    return window.setInterval(() => {
+      this.refreshLatestData(filePath);
+    }, PENDING_RAM_REFRESH_INTERVAL_MS);
+  }
+
+  private getPendingViewData(filePath: string, pendingSave: PendingSaveEntry): string | null {
+    if (pendingSave.view.file?.path !== filePath) {
+      return null;
+    }
+
+    // Edit events only mark the note as dirty; the queue refreshes buffered text from the live view separately.
+    return pendingSave.view.getViewData();
   }
 }
