@@ -1,4 +1,6 @@
-import { App, MarkdownView, TextFileView, TFile } from "obsidian";
+import * as fs from "fs";
+import * as path from "path";
+import { App, FileSystemAdapter, MarkdownView, TextFileView, TFile } from "obsidian";
 import { dlog } from "../debug";
 
 type SaveFn = (this: MarkdownView, ...args: unknown[]) => Promise<void> | void;
@@ -174,6 +176,13 @@ export class PendingSaveQueue {
     const attachedViewFilePath = pendingSave.view.file?.path;
     if (!this.shouldWriteDirectlyToVault() && attachedViewFilePath === filePath) {
       await originalSave.call(pendingSave.view as unknown as MarkdownView);
+      return;
+    }
+
+    const fileSystemAdapter = this.app.vault.adapter;
+    if (fileSystemAdapter instanceof FileSystemAdapter) {
+      fs.writeFileSync(path.join(fileSystemAdapter.getBasePath(), filePath), pendingSave.latestData, "utf8");
+      dlog("Pending save flushed via filesystem", filePath);
       return;
     }
 

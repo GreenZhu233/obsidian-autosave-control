@@ -18,10 +18,15 @@ const runProcess = spawn(
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function sendRealQuitShortcut() {
+function sendRealQuitShortcut(appPid) {
   const script = [
-    'tell application "Obsidian" to activate',
-    'tell application "System Events" to keystroke "q" using command down',
+    'tell application id "md.obsidian" to activate',
+    'delay 1',
+    'tell application "System Events"',
+    `  set frontmost of first application process whose unix id is ${Number(appPid)} to true`,
+    '  delay 0.5',
+    '  key code 12 using command down',
+    'end tell',
   ].join("\n");
 
   const result = spawnSync("osascript", ["-e", script], {
@@ -30,7 +35,7 @@ function sendRealQuitShortcut() {
   });
 
   if (result.status !== 0) {
-    throw new Error(`Failed to send real Cmd+Q to Obsidian: ${result.stderr || result.stdout || "unknown osascript error"}`);
+    throw new Error(`Failed to send real Cmd+Q to Obsidian PID ${appPid}: ${result.stderr || result.stdout || "unknown osascript error"}`);
   }
 }
 
@@ -50,15 +55,38 @@ async function waitForFile(filePath, timeoutMs) {
 async function waitForProcessExit(pid, timeoutMs) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    try {
-      process.kill(pid, 0);
-      await wait(250);
-    } catch {
+    if (!(await isMatchingProcessStillRunning(pid))) {
       return false;
     }
+
+    await wait(250);
   }
 
   return true;
+}
+
+async function isMatchingProcessStillRunning(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0) {
+    return false;
+  }
+
+  const command = result.stdout.trim();
+  if (!command) {
+    return false;
+  }
+
+  return command.includes("/Obsidian") || command.includes("Obsidian Helper");
 }
 
 async function terminatePid(pid) {
@@ -112,7 +140,7 @@ const metadata = JSON.parse(metadataRaw);
 const noteAbsolutePath = path.join(metadata.vaultBasePath, metadata.notePath);
 
 await wait(1000);
-sendRealQuitShortcut();
+sendRealQuitShortcut(metadata.appPid);
 
 let savedContent = null;
 let fileExists = false;

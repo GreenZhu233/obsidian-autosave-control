@@ -348,7 +348,9 @@ describe("Autosave Control manual scenarios", () => {
   it("disables and reloads the plugin while nothing is pending and keeps editing working", async () => {
     const notePath = "switching/reload-plugin.md";
 
+    await expect(await ObsidianApp.getStatusIndicatorCount()).toBe(1);
     await ObsidianApp.reloadPlugin();
+    await expect(await ObsidianApp.getStatusIndicatorCount()).toBe(1);
     await enableDelayedAutosave();
     await ObsidianApp.createAndOpenNote(notePath);
     await ObsidianApp.typeText("still works");
@@ -527,6 +529,7 @@ describe("Autosave Control manual scenarios", () => {
     const notePath = "settings/fresh-defaults.md";
     await ObsidianApp.clearPluginData();
     await ObsidianApp.reloadPlugin();
+    await expect(await ObsidianApp.getStatusIndicatorCount()).toBe(1);
     const settings = await ObsidianApp.getPluginSettings();
 
     await expect(settings.disableAutoSave).toBe(false);

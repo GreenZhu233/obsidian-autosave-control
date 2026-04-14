@@ -7,6 +7,7 @@ export class SaveStatusIndicator {
 
   attach() {
     this.detach();
+    this.removeStaleIndicators();
     this.element = this.plugin.addStatusBarItem();
     this.element.setText("●");
     this.element.addClass("save-status-icon");
@@ -41,5 +42,9 @@ export class SaveStatusIndicator {
     this.element.classList.remove("asc-pending");
     this.element.classList.add("asc-saved");
     this.element.setAttribute("title", "All changes saved");
+  }
+
+  private removeStaleIndicators() {
+    document.querySelectorAll(".save-status-icon").forEach((element) => element.remove());
   }
 }

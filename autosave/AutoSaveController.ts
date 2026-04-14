@@ -1,4 +1,4 @@
-import { App, EventRef, Hotkey, MarkdownView, Platform, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
+import { App, EventRef, Hotkey, MarkdownView, Platform, Tasks, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
 import { dlog } from "../debug";
 import type { AutoSaveControlSettings } from "../settings/AutoSaveSettings";
 import { EditActivityTracker } from "./EditActivityTracker";
@@ -11,6 +11,7 @@ type OnUnloadFileFn = (this: TextFileView, file: TFile) => Promise<void>;
 type SetViewStateFn = (this: WorkspaceLeaf, ...args: unknown[]) => Promise<unknown>;
 type DetachFn = (this: WorkspaceLeaf) => void;
 type SaveCommandCheckCallback = (checking: boolean) => boolean | void;
+type WrappedFunction<T extends Function> = T & { __ascOriginal?: T; __ascOwner?: AutoSaveController };
 const MANUAL_SAVE_REQUEST_TTL_MS = 5000;
 
 type BeforeUnloadListener = (event: BeforeUnloadEvent) => void;
@@ -23,6 +24,13 @@ export class AutoSaveController {
   private originalSetViewState: SetViewStateFn | null = null;
   private originalDetach: DetachFn | null = null;
   private originalSaveCommandCheckCallback: SaveCommandCheckCallback | null = null;
+  private installedSaveWrapper: SaveFn | null = null;
+  private installedRequestSaveWrapper: RequestSaveFn | null = null;
+  private installedOpenFileWrapper: OpenFileFn | null = null;
+  private installedOnUnloadFileWrapper: OnUnloadFileFn | null = null;
+  private installedSetViewStateWrapper: SetViewStateFn | null = null;
+  private installedDetachWrapper: DetachFn | null = null;
+  private installedSaveCommandCheckCallback: SaveCommandCheckCallback | null = null;
   private isUnloading = false;
   private workspaceLeafChangeEventRef?: EventRef;
   private workspaceQuitEventRef?: EventRef;
@@ -86,25 +94,31 @@ export class AutoSaveController {
       detach: DetachFn;
     };
 
-    this.originalSave = markdownViewPrototype.save;
-    markdownViewPrototype.save = this.createSaveWrapper(markdownViewPrototype.save);
+    this.originalSave = this.unwrapWrappedFunction(markdownViewPrototype.save);
+    this.installedSaveWrapper = this.createSaveWrapper(this.originalSave);
+    markdownViewPrototype.save = this.installedSaveWrapper;
 
     if (typeof textFileViewPrototype.requestSave === "function") {
-      this.originalRequestSave = textFileViewPrototype.requestSave;
-      textFileViewPrototype.requestSave = this.createRequestSaveWrapper(textFileViewPrototype.requestSave);
+      this.originalRequestSave = this.unwrapWrappedFunction(textFileViewPrototype.requestSave);
+      this.installedRequestSaveWrapper = this.createRequestSaveWrapper(this.originalRequestSave);
+      textFileViewPrototype.requestSave = this.installedRequestSaveWrapper;
     }
 
-    this.originalOnUnloadFile = textFileViewPrototype.onUnloadFile;
-    textFileViewPrototype.onUnloadFile = this.createOnUnloadFileWrapper(textFileViewPrototype.onUnloadFile);
+    this.originalOnUnloadFile = this.unwrapWrappedFunction(textFileViewPrototype.onUnloadFile);
+    this.installedOnUnloadFileWrapper = this.createOnUnloadFileWrapper(this.originalOnUnloadFile);
+    textFileViewPrototype.onUnloadFile = this.installedOnUnloadFileWrapper;
 
-    this.originalOpenFile = workspaceLeafPrototype.openFile;
-    workspaceLeafPrototype.openFile = this.createOpenFileWrapper(workspaceLeafPrototype.openFile);
+    this.originalOpenFile = this.unwrapWrappedFunction(workspaceLeafPrototype.openFile);
+    this.installedOpenFileWrapper = this.createOpenFileWrapper(this.originalOpenFile);
+    workspaceLeafPrototype.openFile = this.installedOpenFileWrapper;
 
-    this.originalSetViewState = workspaceLeafViewStatePrototype.setViewState;
-    workspaceLeafViewStatePrototype.setViewState = this.createSetViewStateWrapper(workspaceLeafViewStatePrototype.setViewState);
+    this.originalSetViewState = this.unwrapWrappedFunction(workspaceLeafViewStatePrototype.setViewState);
+    this.installedSetViewStateWrapper = this.createSetViewStateWrapper(this.originalSetViewState);
+    workspaceLeafViewStatePrototype.setViewState = this.installedSetViewStateWrapper;
 
-    this.originalDetach = workspaceLeafViewStatePrototype.detach;
-    workspaceLeafViewStatePrototype.detach = this.createDetachWrapper(workspaceLeafViewStatePrototype.detach);
+    this.originalDetach = this.unwrapWrappedFunction(workspaceLeafViewStatePrototype.detach);
+    this.installedDetachWrapper = this.createDetachWrapper(this.originalDetach);
+    workspaceLeafViewStatePrototype.detach = this.installedDetachWrapper;
 
     this.wrapSaveCommand();
 
@@ -126,12 +140,18 @@ export class AutoSaveController {
       this.attachWindowObservers(this.getViewWindow(leaf.view));
     });
 
-    this.workspaceQuitEventRef = this.app.workspace.on("quit", () => {
-      this.isUnloading = true;
+    this.workspaceQuitEventRef = this.app.workspace.on("quit", (tasks: Tasks) => {
       this.pendingSaveQueue.refreshAllLatestData();
       if (!this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
-        void this.pendingSaveQueue.flushAll();
+        tasks.add(async () => {
+          await this.pendingSaveQueue.flushAll();
+          this.isUnloading = true;
+          this.exitApplicationAfterFlush();
+        });
+        return;
       }
+
+      this.isUnloading = true;
     });
 
     this.attachWindowObservers(window);
@@ -158,35 +178,44 @@ export class AutoSaveController {
       detach: DetachFn;
     };
 
-    if (this.originalSave) {
+    if (this.originalSave && markdownViewPrototype.save === this.installedSaveWrapper) {
       markdownViewPrototype.save = this.originalSave;
-      this.originalSave = null;
     }
+    this.originalSave = null;
+    this.installedSaveWrapper = null;
 
-    if (this.originalRequestSave) {
+    if (this.originalRequestSave && textFileViewPrototype.requestSave === this.installedRequestSaveWrapper) {
       textFileViewPrototype.requestSave = this.originalRequestSave;
-      this.originalRequestSave = null;
     }
+    this.originalRequestSave = null;
+    this.installedRequestSaveWrapper = null;
 
-    if (this.originalOnUnloadFile) {
+    if (this.originalOnUnloadFile && textFileViewPrototype.onUnloadFile === this.installedOnUnloadFileWrapper) {
       textFileViewPrototype.onUnloadFile = this.originalOnUnloadFile;
-      this.originalOnUnloadFile = null;
     }
+    this.originalOnUnloadFile = null;
+    this.installedOnUnloadFileWrapper = null;
 
-    if (this.originalOpenFile) {
+    if (this.originalOpenFile && workspaceLeafPrototype.openFile === this.installedOpenFileWrapper) {
       workspaceLeafPrototype.openFile = this.originalOpenFile;
-      this.originalOpenFile = null;
     }
+    this.originalOpenFile = null;
+    this.installedOpenFileWrapper = null;
 
-    if (this.originalSetViewState) {
+    if (
+      this.originalSetViewState &&
+      workspaceLeafViewStatePrototype.setViewState === this.installedSetViewStateWrapper
+    ) {
       workspaceLeafViewStatePrototype.setViewState = this.originalSetViewState;
-      this.originalSetViewState = null;
     }
+    this.originalSetViewState = null;
+    this.installedSetViewStateWrapper = null;
 
-    if (this.originalDetach) {
+    if (this.originalDetach && workspaceLeafViewStatePrototype.detach === this.installedDetachWrapper) {
       workspaceLeafViewStatePrototype.detach = this.originalDetach;
-      this.originalDetach = null;
     }
+    this.originalDetach = null;
+    this.installedDetachWrapper = null;
 
     this.restoreSaveCommand();
 
@@ -216,7 +245,7 @@ export class AutoSaveController {
   private createSaveWrapper(originalSave: SaveFn): SaveFn {
     const controller = this;
 
-    return function wrappedSave(this: MarkdownView, ...args: unknown[]) {
+    const wrappedSave = function wrappedSave(this: MarkdownView, ...args: unknown[]) {
       const filePath = this.file?.path;
       if (!filePath) {
         return originalSave.apply(this, args);
@@ -251,12 +280,14 @@ export class AutoSaveController {
 
       return originalSave.apply(this, args);
     };
+
+    return this.markWrappedFunction(wrappedSave, originalSave);
   }
 
   private createOnUnloadFileWrapper(originalOnUnloadFile: OnUnloadFileFn): OnUnloadFileFn {
     const controller = this;
 
-    return async function wrappedOnUnloadFile(this: TextFileView, file: TFile) {
+    const wrappedOnUnloadFile = async function wrappedOnUnloadFile(this: TextFileView, file: TFile) {
       if (controller.discardedFilePaths.has(file.path)) {
         controller.discardedFilePaths.delete(file.path);
         return;
@@ -276,12 +307,14 @@ export class AutoSaveController {
 
       await originalOnUnloadFile.call(this, file);
     };
+
+    return this.markWrappedFunction(wrappedOnUnloadFile, originalOnUnloadFile);
   }
 
   private createRequestSaveWrapper(originalRequestSave: RequestSaveFn): RequestSaveFn {
     const controller = this;
 
-    return function wrappedRequestSave(this: TextFileView, ...args: unknown[]) {
+    const wrappedRequestSave = function wrappedRequestSave(this: TextFileView, ...args: unknown[]) {
       const filePath = this.file?.path;
       if (!filePath) {
         return originalRequestSave.apply(this, args);
@@ -305,12 +338,14 @@ export class AutoSaveController {
 
       controller.pendingSaveQueue.schedule(filePath, this);
     };
+
+    return this.markWrappedFunction(wrappedRequestSave, originalRequestSave);
   }
 
   private createOpenFileWrapper(originalOpenFile: OpenFileFn): OpenFileFn {
     const controller = this;
 
-    return async function wrappedOpenFile(this: WorkspaceLeaf, ...args: unknown[]) {
+    const wrappedOpenFile = async function wrappedOpenFile(this: WorkspaceLeaf, ...args: unknown[]) {
       controller.syncLeafPendingData(this);
       controller.fileSwitchingLeaves.add(this);
 
@@ -322,12 +357,14 @@ export class AutoSaveController {
         controller.clearLeafSwitchingState(this);
       }
     };
+
+    return this.markWrappedFunction(wrappedOpenFile, originalOpenFile);
   }
 
   private createSetViewStateWrapper(originalSetViewState: SetViewStateFn): SetViewStateFn {
     const controller = this;
 
-    return async function wrappedSetViewState(this: WorkspaceLeaf, ...args: unknown[]) {
+    const wrappedSetViewState = async function wrappedSetViewState(this: WorkspaceLeaf, ...args: unknown[]) {
       controller.syncLeafPendingData(this);
       controller.fileSwitchingLeaves.add(this);
 
@@ -339,12 +376,14 @@ export class AutoSaveController {
         controller.clearLeafSwitchingState(this);
       }
     };
+
+    return this.markWrappedFunction(wrappedSetViewState, originalSetViewState);
   }
 
   private createDetachWrapper(originalDetach: DetachFn): DetachFn {
     const controller = this;
 
-    return function wrappedDetach(this: WorkspaceLeaf) {
+    const wrappedDetach = function wrappedDetach(this: WorkspaceLeaf) {
       const filePath = controller.getLeafMarkdownFilePath(this);
       if (filePath) {
         controller.syncPendingDataForFile(filePath);
@@ -372,6 +411,19 @@ export class AutoSaveController {
 
       originalDetach.call(this);
     };
+
+    return this.markWrappedFunction(wrappedDetach, originalDetach);
+  }
+
+  private markWrappedFunction<T extends Function>(wrapper: T, original: T): T {
+    const wrappedFunction = wrapper as WrappedFunction<T>;
+    wrappedFunction.__ascOriginal = original;
+    wrappedFunction.__ascOwner = this;
+    return wrapper;
+  }
+
+  private unwrapWrappedFunction<T extends Function>(fn: T): T {
+    return (fn as WrappedFunction<T>).__ascOriginal ?? fn;
   }
 
   private attachWindowObservers(targetWindow: Window | null) {
@@ -392,16 +444,16 @@ export class AutoSaveController {
     };
 
     const beforeUnloadWithPrompt = (event: BeforeUnloadEvent) => {
-      this.pendingSaveQueue.refreshAllLatestData();
-
-      if (this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
-        event.preventDefault();
-        event.returnValue = "You have unsaved changes. Closing Obsidian now will discard them.";
+      if (!this.getSettings().disableAutoSave) {
         return;
       }
 
-      if (!this.getSettings().disableAutoSave && this.pendingSaveQueue.hasAny()) {
-        void this.pendingSaveQueue.flushAll();
+      this.pendingSaveQueue.refreshAllLatestData();
+
+      if (this.pendingSaveQueue.hasAny()) {
+        event.preventDefault();
+        event.returnValue = "You have unsaved changes. Closing Obsidian now will discard them.";
+        return;
       }
 
       beforeUnload();
@@ -647,6 +699,31 @@ export class AutoSaveController {
     this.manualSaveRequestTimeoutsByPath.clear();
   }
 
+  private exitApplicationAfterFlush(): void {
+    const globalState = window as typeof window & { require?: any };
+    const electron = globalState.require?.("electron");
+
+    try {
+      electron?.remote?.app?.exit?.(0);
+      return;
+    } catch {
+      // fall through to softer quit paths
+    }
+
+    try {
+      electron?.remote?.app?.quit?.();
+      return;
+    } catch {
+      // fall through to softer quit paths
+    }
+
+    try {
+      electron?.ipcRenderer?.send?.("app:quit");
+    } catch {
+      // no supported explicit quit path available
+    }
+  }
+
   private wrapSaveCommand(): void {
     const controller = this;
     const saveCommandDefinition = this.getSaveCommandDefinition();
@@ -654,27 +731,36 @@ export class AutoSaveController {
       return;
     }
 
-    const checkCallback = saveCommandDefinition.checkCallback;
+    const checkCallback = this.unwrapWrappedFunction(saveCommandDefinition.checkCallback);
     this.originalSaveCommandCheckCallback = checkCallback;
-    saveCommandDefinition.checkCallback = function (this: unknown, checking: boolean) {
+    const wrappedCheckCallback = function (this: unknown, checking: boolean) {
       if (!checking) {
         controller.markActiveFileManualSaveRequested();
       }
 
       return checkCallback.call(this, checking);
     };
+
+    this.installedSaveCommandCheckCallback = this.markWrappedFunction(wrappedCheckCallback, checkCallback);
+    saveCommandDefinition.checkCallback = this.installedSaveCommandCheckCallback;
   }
 
   private restoreSaveCommand(): void {
     const saveCommandDefinition = this.getSaveCommandDefinition();
     if (!saveCommandDefinition || !this.originalSaveCommandCheckCallback) {
       this.originalSaveCommandCheckCallback = null;
+      this.installedSaveCommandCheckCallback = null;
       return;
     }
 
-    saveCommandDefinition.checkCallback = this.originalSaveCommandCheckCallback;
+    if (saveCommandDefinition.checkCallback === this.installedSaveCommandCheckCallback) {
+      saveCommandDefinition.checkCallback = this.originalSaveCommandCheckCallback;
+    }
+
     this.originalSaveCommandCheckCallback = null;
+    this.installedSaveCommandCheckCallback = null;
   }
+
 
   private markActiveFileManualSaveRequested(): void {
     const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
