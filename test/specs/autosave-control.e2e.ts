@@ -290,7 +290,7 @@ describe("Autosave Control manual scenarios", () => {
     await expect(await ObsidianApp.getCursor()).toEqual({ line: 1, ch: 4 });
 
     await ObsidianApp.createAndOpenNote(targetNotePath, "other note");
-    await ObsidianApp.openExistingNote(originalNotePath);
+    await ObsidianApp.openExistingNote(originalNotePath, { preserveCursor: true });
 
     await expect(await ObsidianApp.getCursor()).toEqual({ line: 1, ch: 4 });
   });

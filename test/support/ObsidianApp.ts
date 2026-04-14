@@ -130,7 +130,7 @@ class ObsidianApp {
     }, PLUGIN_ID);
   }
 
-  async createAndOpenNote(notePath: string, initialContent = "") {
+  async createAndOpenNote(notePath: string, initialContent = "", options: { preserveCursor?: boolean } = {}) {
     await browser.execute(async (nextNotePath: string, nextInitialContent: string) => {
       const app = (window as typeof window & { app: any }).app;
       const parentPath = nextNotePath.includes("/") ? nextNotePath.split("/").slice(0, -1).join("/") : "";
@@ -152,10 +152,10 @@ class ObsidianApp {
     }, notePath, initialContent);
 
     await this.waitForActiveFile(notePath);
-    await this.focusEditor();
+    await this.focusEditor(options);
   }
 
-  async openExistingNote(notePath: string) {
+  async openExistingNote(notePath: string, options: { preserveCursor?: boolean } = {}) {
     await browser.execute(async (nextNotePath: string) => {
       const app = (window as typeof window & { app: any }).app;
       const file = app.vault.getAbstractFileByPath(nextNotePath);
@@ -169,7 +169,7 @@ class ObsidianApp {
     }, notePath);
 
     await this.waitForActiveFile(notePath);
-    await this.focusEditor();
+    await this.focusEditor(options);
   }
 
   async waitForActiveFile(notePath: string) {
@@ -184,10 +184,25 @@ class ObsidianApp {
     });
   }
 
-  async focusEditor() {
+  async focusEditor(options: { preserveCursor?: boolean } = {}) {
     const editor = await $(".workspace-leaf.mod-active .cm-content");
     await editor.waitForExist({ timeout: 10000 });
-    await editor.click();
+    await browser.execute((preserveCursor: boolean) => {
+      const app = (window as typeof window & { app: any }).app;
+      const editorInstance = app.workspace.activeLeaf?.view?.editor;
+      window.focus();
+      editorInstance?.focus?.();
+
+      if (preserveCursor || !editorInstance) {
+        return;
+      }
+
+      const value = editorInstance.getValue?.() ?? "";
+      const lines = value.split("\n");
+      const lastLineIndex = Math.max(lines.length - 1, 0);
+      const lastLine = lines[lastLineIndex] ?? "";
+      editorInstance.setCursor?.({ line: lastLineIndex, ch: lastLine.length });
+    }, options.preserveCursor ?? false);
   }
 
   async typeText(text: string) {

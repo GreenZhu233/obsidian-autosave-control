@@ -1,4 +1,4 @@
-import { App, EventRef, Hotkey, MarkdownView, Platform, Tasks, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
+import { App, EditorPosition, EventRef, Hotkey, MarkdownView, Platform, Tasks, TextFileView, TFile, WorkspaceLeaf } from "obsidian";
 import { dlog } from "../debug";
 import type { AutoSaveControlSettings } from "../settings/AutoSaveSettings";
 import { EditActivityTracker } from "./EditActivityTracker";
@@ -46,6 +46,7 @@ export class AutoSaveController {
   private readonly manualSaveRequestTimeoutsByPath = new Map<string, number>();
   private readonly discardedFilePaths = new Set<string>();
   private readonly lastSavedDataByPath = new Map<string, string>();
+  private readonly cursorPositionByPath = new Map<string, EditorPosition>();
 
   constructor(private readonly app: App, private readonly getSettings: () => AutoSaveControlSettings) {
     this.editActivityTracker = new EditActivityTracker(
@@ -354,6 +355,7 @@ export class AutoSaveController {
       } finally {
         void controller.captureLeafSavedData(this);
         controller.schedulePendingDataRestoreInLeaf(this);
+        controller.scheduleLeafCursorRestore(this);
         controller.clearLeafSwitchingState(this);
       }
     };
@@ -373,6 +375,7 @@ export class AutoSaveController {
       } finally {
         void controller.captureLeafSavedData(this);
         controller.schedulePendingDataRestoreInLeaf(this);
+        controller.scheduleLeafCursorRestore(this);
         controller.clearLeafSwitchingState(this);
       }
     };
@@ -510,7 +513,17 @@ export class AutoSaveController {
       return;
     }
 
+    this.captureLeafCursorPosition(leaf, filePath);
     this.syncPendingDataForFile(filePath);
+  }
+
+  private captureLeafCursorPosition(leaf: WorkspaceLeaf, filePath: string): void {
+    const view = leaf.view;
+    if (!(view instanceof MarkdownView)) {
+      return;
+    }
+
+    this.cursorPositionByPath.set(filePath, view.editor.getCursor());
   }
 
   private restoreSavedDataIntoLeaf(leaf: WorkspaceLeaf, filePath: string): void {
@@ -558,6 +571,26 @@ export class AutoSaveController {
       }
 
       this.restorePendingDataIntoLeaf(leaf.view as unknown as TextFileView & { data?: string }, filePath);
+    }, 0);
+  }
+
+  private scheduleLeafCursorRestore(leaf: WorkspaceLeaf): void {
+    window.setTimeout(() => {
+      if (this.isUnloading) {
+        return;
+      }
+
+      const filePath = this.getLeafMarkdownFilePath(leaf);
+      if (!filePath || !(leaf.view instanceof MarkdownView)) {
+        return;
+      }
+
+      const cursorPosition = this.cursorPositionByPath.get(filePath);
+      if (!cursorPosition) {
+        return;
+      }
+
+      leaf.view.editor.setCursor(cursorPosition);
     }, 0);
   }
 
