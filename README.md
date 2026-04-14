@@ -88,7 +88,7 @@ Setup:
 - Run `npm install`.
 - The first test run downloads Obsidian into `.obsidian-cache/`.
 
-Run all non-destructive tests:
+Run tests:
 
 ```bash
 npm run wdio
@@ -98,18 +98,6 @@ Run one specific test:
 
 ```bash
 npx wdio run ./wdio.conf.mts --spec ./test/specs/autosave-control.e2e.ts --mochaOpts.grep "your test name"
-```
-
-Run the real quit/unload verification test:
-
-```bash
-npm run wdio:quit-save
-```
-
-Run everything:
-
-```bash
-npm run wdio:all
 ```
 
 ## License
