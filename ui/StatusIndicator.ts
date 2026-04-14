@@ -1,15 +1,21 @@
 import type { Plugin } from "obsidian";
 
 export class SaveStatusIndicator {
-  private element!: HTMLElement;
+  private element: HTMLElement | null = null;
 
   constructor(private readonly plugin: Plugin) {}
 
   attach() {
+    this.detach();
     this.element = this.plugin.addStatusBarItem();
     this.element.setText("●");
     this.element.addClass("save-status-icon");
     this.showAllChangesSaved();
+  }
+
+  detach() {
+    this.element?.remove();
+    this.element = null;
   }
 
   setPendingSaveCount(pendingSaveCount: number) {

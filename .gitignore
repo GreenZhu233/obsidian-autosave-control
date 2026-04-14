@@ -29,5 +29,9 @@ dist/
 package-lock.json
 yarn.lock
 
+# WDIO Obsidian Service cache
+.obsidian-cache/
+test-output/
+
 # OS specific files
 Thumbs.db

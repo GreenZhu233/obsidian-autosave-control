@@ -11,8 +11,12 @@ export default class AutoSaveControlPlugin extends Plugin {
   private saveStatusIndicator!: SaveStatusIndicator;
   private autosaveController!: AutoSaveController;
   private stylesElement: HTMLStyleElement | null = null;
+  private runtimeCleanup: (() => void) | null = null;
 
   async onload() {
+    const globalState = window as typeof window & { __ascRuntimeCleanup?: (() => void) | null };
+    globalState.__ascRuntimeCleanup?.();
+
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
     this.saveStatusIndicator = new SaveStatusIndicator(this);
@@ -29,15 +33,29 @@ export default class AutoSaveControlPlugin extends Plugin {
     this.applyStatusIconSize();
 
     this.addSettingTab(new AutoSaveControlSettingsTab(this.app, this));
+
+    this.runtimeCleanup = () => {
+      this.autosaveController.disable();
+      this.saveStatusIndicator.detach();
+
+      if (this.stylesElement) {
+        this.stylesElement.remove();
+        this.stylesElement = null;
+      }
+    };
+
+    globalState.__ascRuntimeCleanup = this.runtimeCleanup;
   }
 
   onunload() {
-    this.autosaveController.disable();
+    this.runtimeCleanup?.();
 
-    if (this.stylesElement) {
-      this.stylesElement.remove();
-      this.stylesElement = null;
+    const globalState = window as typeof window & { __ascRuntimeCleanup?: (() => void) | null };
+    if (globalState.__ascRuntimeCleanup === this.runtimeCleanup) {
+      globalState.__ascRuntimeCleanup = null;
     }
+
+    this.runtimeCleanup = null;
   }
 
   async saveSettings() {

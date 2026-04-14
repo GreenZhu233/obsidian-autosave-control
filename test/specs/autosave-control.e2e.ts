@@ -1,0 +1,556 @@
+import { browser, expect } from "@wdio/globals";
+import ObsidianApp from "../support/ObsidianApp";
+
+const SHORT_DELAY_SECONDS = 3;
+
+async function enableDelayedAutosave(saveDelaySeconds = SHORT_DELAY_SECONDS) {
+  await ObsidianApp.setPluginSettings({
+    disableAutoSave: false,
+    saveDelaySeconds,
+  });
+}
+
+async function enableManualOnlyMode() {
+  await ObsidianApp.setPluginSettings({
+    disableAutoSave: true,
+    saveDelaySeconds: SHORT_DELAY_SECONDS,
+  });
+}
+
+async function expectSavedAfterDelay(
+  notePath: string,
+  expectedContent: string,
+  timeout = 7000,
+  options: { waitForStatus?: boolean } = {},
+) {
+  await ObsidianApp.waitForVaultFileContent(notePath, expectedContent, timeout);
+  if (options.waitForStatus !== false) {
+    await ObsidianApp.waitForSavedStatus();
+  }
+}
+
+describe("Autosave Control manual scenarios", () => {
+  beforeEach(async () => {
+    await ObsidianApp.reloadWithFreshVault();
+  });
+
+  it("types normal letters continuously for longer than 2 seconds without saving until typing stops", async () => {
+    const notePath = "core/continuous-typing.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("abcd");
+    await browser.pause(1200);
+    await ObsidianApp.typeText("efgh");
+    await ObsidianApp.waitForPendingStatus();
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "abcdefgh");
+  });
+
+  it("stops typing and waits for exactly one save after the configured delay", async () => {
+    const notePath = "core/one-save-after-delay.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("save once");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1500);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "save once");
+    const savedMtime = await ObsidianApp.getVaultFileMtimeMs(notePath);
+    await browser.pause(1500);
+    await expect(await ObsidianApp.getVaultFileMtimeMs(notePath)).toBe(savedMtime);
+  });
+
+  it("resets the timer when typing resumes before the delay finishes", async () => {
+    const notePath = "core/reset-timer.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("abc");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(2000);
+    await ObsidianApp.typeText("d");
+    await browser.pause(1500);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "abcd");
+  });
+
+  it("leaves an idle note without changes and performs no extra saves", async () => {
+    const notePath = "core/idle-note.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath, "already saved");
+    await ObsidianApp.waitForSavedStatus();
+    const initialMtime = await ObsidianApp.getVaultFileMtimeMs(notePath);
+
+    await browser.pause(4000);
+
+    await expect(await ObsidianApp.getVaultFileMtimeMs(notePath)).toBe(initialMtime);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("already saved");
+  });
+
+  it("uses Obsidian's Save File command to save immediately while changes are pending", async () => {
+    const notePath = "core/manual-save-command.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("manual save path");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1000);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await ObsidianApp.runSaveCommand();
+    await expectSavedAfterDelay(notePath, "manual save path", 4000);
+  });
+
+  it("presses Enter repeatedly and still delays the save", async () => {
+    const notePath = "special-input/enter.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.pressKey("Enter", 3);
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "\n\n\n");
+  });
+
+  it("presses Backspace repeatedly and still delays the save", async () => {
+    const notePath = "special-input/backspace.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath, "abcd");
+    await ObsidianApp.pressKey("Backspace", 2);
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("abcd");
+
+    await expectSavedAfterDelay(notePath, "ab");
+  });
+
+  it("presses Delete repeatedly and still delays the save", async () => {
+    const notePath = "special-input/delete.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath, "abcd");
+    await ObsidianApp.deleteFromStart(2);
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("abcd");
+
+    await expectSavedAfterDelay(notePath, "cd");
+  });
+
+  it("presses Space repeatedly and still delays the save", async () => {
+    const notePath = "special-input/space.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("   ");
+    await ObsidianApp.waitForPendingStatus();
+
+    await expectSavedAfterDelay(notePath, "   ");
+  });
+
+  it("pastes text and saves after the delay", async () => {
+    const notePath = "special-input/paste.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.pasteText("pasted text");
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "pasted text");
+  });
+
+  it("cuts text and saves after the delay", async () => {
+    const notePath = "special-input/cut.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath, "cut me");
+    await ObsidianApp.selectAllEditorContent();
+    await ObsidianApp.cutSelection();
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("cut me");
+
+    await expectSavedAfterDelay(notePath, "");
+  });
+
+  it("opens a note in a new window and uses delayed save there too", async () => {
+    const notePath = "multiple-windows/popup-note.md";
+    const mainHandle = await ObsidianApp.getMainWindowHandle();
+
+    await enableDelayedAutosave();
+    await ObsidianApp.openNoteInNewWindow(notePath);
+    await ObsidianApp.typeText("popup edit");
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+    await expectSavedAfterDelay(notePath, "popup edit", 7000, { waitForStatus: false });
+
+    if (mainHandle) {
+      await ObsidianApp.switchToWindow(mainHandle);
+    }
+  });
+
+  it("edits different notes in the main window and a popup window on independent timers", async () => {
+    const mainNotePath = "multiple-windows/main-note.md";
+    const popupNotePath = "multiple-windows/popup-note-independent.md";
+    const mainHandle = await ObsidianApp.getMainWindowHandle();
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(mainNotePath);
+    await ObsidianApp.typeText("main");
+    await ObsidianApp.waitForPendingStatus();
+
+    const popupHandle = await ObsidianApp.openNoteInNewWindow(popupNotePath);
+    await ObsidianApp.typeText("popup");
+    await browser.pause(1200);
+
+    await expect(await ObsidianApp.readVaultFile(mainNotePath)).toBe("");
+    await expect(await ObsidianApp.readVaultFile(popupNotePath)).toBe("");
+
+    if (mainHandle) {
+      await ObsidianApp.switchToWindow(mainHandle);
+    }
+    await expectSavedAfterDelay(mainNotePath, "main");
+    await ObsidianApp.switchToWindow(popupHandle);
+    await expectSavedAfterDelay(popupNotePath, "popup", 7000, { waitForStatus: false });
+  });
+
+  it("switches focus between windows while a save is pending without forcing an immediate save", async () => {
+    const mainNotePath = "multiple-windows/focus-main.md";
+    const popupNotePath = "multiple-windows/focus-popup.md";
+    const mainHandle = await ObsidianApp.getMainWindowHandle();
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(mainNotePath);
+    await ObsidianApp.typeText("pending main");
+    await ObsidianApp.waitForPendingStatus();
+
+    const popupHandle = await ObsidianApp.openNoteInNewWindow(popupNotePath);
+    await ObsidianApp.focusWindow();
+    await browser.pause(1000);
+    if (mainHandle) {
+      await ObsidianApp.switchToWindow(mainHandle);
+    }
+
+    await expect(await ObsidianApp.readVaultFile(mainNotePath)).toBe("");
+    await expectSavedAfterDelay(mainNotePath, "pending main");
+    await ObsidianApp.switchToWindow(popupHandle);
+  });
+
+  it("closes a popup window with pending edits and flushes them to disk", async () => {
+    const notePath = "multiple-windows/close-popup.md";
+    const mainHandle = await ObsidianApp.getMainWindowHandle();
+
+    await enableDelayedAutosave();
+    await ObsidianApp.openNoteInNewWindow(notePath);
+    await ObsidianApp.typeText("close popup");
+    await browser.pause(1000);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await browser.closeWindow();
+    if (mainHandle) {
+      await ObsidianApp.switchToWindow(mainHandle);
+    }
+    await expectSavedAfterDelay(notePath, "close popup", 7000, { waitForStatus: false });
+  });
+
+  it("switches to another note without forcing an immediate save and still saves on the timer", async () => {
+    const originalNotePath = "switching/switch-away-source.md";
+    const targetNotePath = "switching/switch-away-target.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(originalNotePath);
+    await ObsidianApp.typeText("switch away");
+    await ObsidianApp.waitForPendingStatus();
+    await ObsidianApp.createAndOpenNote(targetNotePath, "other note");
+    await browser.pause(1000);
+    await expect(await ObsidianApp.readVaultFile(originalNotePath)).toBe("");
+
+    await expectSavedAfterDelay(originalNotePath, "switch away");
+  });
+
+  it("loses the cursor position after switching away from a saved note and back", async () => {
+    const originalNotePath = "switching/cursor-source.md";
+    const targetNotePath = "switching/cursor-target.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(originalNotePath, "first line\nsecond line\nthird line");
+    await ObsidianApp.runSaveCommand();
+    await browser.pause(500);
+
+    await ObsidianApp.setCursor(1, 4);
+    await expect(await ObsidianApp.getCursor()).toEqual({ line: 1, ch: 4 });
+
+    await ObsidianApp.createAndOpenNote(targetNotePath, "other note");
+    await ObsidianApp.openExistingNote(originalNotePath);
+
+    await expect(await ObsidianApp.getCursor()).toEqual({ line: 1, ch: 4 });
+  });
+
+  it("closes a note tab with pending edits and saves the note", async () => {
+    const notePath = "switching/close-tab.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.openNoteInNewTab("switching/anchor.md", "anchor");
+    await ObsidianApp.openNoteInNewTab(notePath);
+    await ObsidianApp.typeText("tab close save");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1000);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await ObsidianApp.closeActiveTab();
+    await expectSavedAfterDelay(notePath, "tab close save");
+  });
+
+  it("focuses another Obsidian window without forcing an immediate save", async () => {
+    const mainNotePath = "switching/window-switch-main.md";
+    const popupNotePath = "switching/window-switch-popup.md";
+    const mainHandle = await ObsidianApp.getMainWindowHandle();
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(mainNotePath);
+    await ObsidianApp.typeText("window switch");
+    await ObsidianApp.waitForPendingStatus();
+
+    const popupHandle = await ObsidianApp.openNoteInNewWindow(popupNotePath, "popup anchor");
+    await browser.pause(1000);
+    if (mainHandle) {
+      await ObsidianApp.switchToWindow(mainHandle);
+    }
+
+    await expect(await ObsidianApp.readVaultFile(mainNotePath)).toBe("");
+    await expectSavedAfterDelay(mainNotePath, "window switch");
+    await ObsidianApp.switchToWindow(popupHandle);
+  });
+
+  it("switches to another app before the delay finishes without forcing a save", async () => {
+    const notePath = "switching/blur-window.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("blur test");
+    await ObsidianApp.waitForPendingStatus();
+    await ObsidianApp.triggerWindowBlur();
+    await browser.pause(1000);
+
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+    await expectSavedAfterDelay(notePath, "blur test");
+  });
+
+  it("disables and reloads the plugin while nothing is pending and keeps editing working", async () => {
+    const notePath = "switching/reload-plugin.md";
+
+    await ObsidianApp.reloadPlugin();
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("still works");
+    await ObsidianApp.waitForPendingStatus();
+
+    await expectSavedAfterDelay(notePath, "still works");
+  });
+
+  it("changes the status dot to pending soon after editing starts", async () => {
+    const notePath = "status/pending-tooltip.md";
+
+    await enableDelayedAutosave(30);
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("x");
+    await ObsidianApp.waitForPendingStatus();
+    await expect(await ObsidianApp.getStatusIndicatorTitle()).toBe("Changes pending save");
+  });
+
+  it("changes the status dot back to saved after autosave completes", async () => {
+    const notePath = "status/saved-tooltip.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("saved again");
+    await ObsidianApp.waitForPendingStatus();
+    await expectSavedAfterDelay(notePath, "saved again");
+    await expect(await ObsidianApp.getStatusIndicatorTitle()).toBe("All changes saved");
+  });
+
+  it("keeps the indicator pending until two different files have both saved", async () => {
+    const firstNotePath = "status/two-files-first.md";
+    const secondNotePath = "status/two-files-second.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(firstNotePath);
+    await ObsidianApp.typeText("first");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1500);
+    await ObsidianApp.openNoteInNewTab(secondNotePath);
+    await ObsidianApp.typeText("second");
+    await ObsidianApp.waitForPendingStatus();
+
+    await ObsidianApp.waitForVaultFileContent(firstNotePath, "first", 5000);
+    await expect(await ObsidianApp.getStatusIndicatorTitle()).toBe("Changes pending save");
+    await expectSavedAfterDelay(secondNotePath, "second");
+  });
+
+  it("enables complete autosave disablement, hides save delay, and shows the warning", async () => {
+    await enableDelayedAutosave(10);
+    await ObsidianApp.openPluginSettingsTab();
+    await ObsidianApp.toggleDisableAutosaveSetting();
+
+    await browser.waitUntil(async () => !(await ObsidianApp.isSaveDelaySettingVisible()), {
+      timeout: 5000,
+      timeoutMsg: "Save delay control stayed visible after disabling autosave.",
+    });
+
+    await expect(await ObsidianApp.getSettingDescription("Warning")).toContain("Automatic saves are fully disabled");
+  });
+
+  it("keeps changes pending until manual save when autosave is completely disabled", async () => {
+    const notePath = "settings/manual-only-pending.md";
+
+    await enableManualOnlyMode();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("still pending");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(4500);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await ObsidianApp.runSaveCommand();
+    await expectSavedAfterDelay(notePath, "still pending", 4000);
+  });
+
+  it("shows a confirmation prompt when closing Obsidian with pending changes in manual-only mode", async () => {
+    const notePath = "settings/quit-prompt.md";
+
+    await enableManualOnlyMode();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("unsaved");
+    await ObsidianApp.waitForPendingStatus();
+
+    const beforeUnload = await ObsidianApp.dispatchBeforeUnload();
+    await expect(beforeUnload.defaultPrevented).toBe(true);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+  });
+
+  it("cancels the close prompt in manual-only mode and keeps Obsidian open without saving", async () => {
+    const notePath = "settings/cancel-quit.md";
+
+    await enableManualOnlyMode();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("do not discard");
+    await ObsidianApp.waitForPendingStatus();
+    await ObsidianApp.installConfirmStub(false);
+
+    await ObsidianApp.triggerQuitShortcut();
+    const messages = await ObsidianApp.getConfirmMessages();
+
+    await expect(messages[0]).toContain("Quit Obsidian and discard");
+    await expect(await ObsidianApp.getActiveFilePath()).toBe(notePath);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+    await ObsidianApp.restoreConfirm();
+  });
+
+  it("re-enables delayed autosave while changes are pending in manual-only mode and resumes the timer", async () => {
+    const notePath = "settings/reenable-timer.md";
+
+    await enableManualOnlyMode();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("resume timer");
+    await ObsidianApp.waitForPendingStatus();
+
+    await ObsidianApp.setPluginSettings({ disableAutoSave: false, saveDelaySeconds: SHORT_DELAY_SECONDS });
+    await expectSavedAfterDelay(notePath, "resume timer");
+  });
+
+  it("changes save delay to another valid value and uses it for the next pending save", async () => {
+    const notePath = "settings/change-delay.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.openPluginSettingsTab();
+    await ObsidianApp.setTextSettingValue("Save delay (seconds)", "5");
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("five second save");
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(3500);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "five second save", 4000);
+  });
+
+  it("clamps save delay values below 3 and above 3600", async () => {
+    await enableDelayedAutosave();
+    await ObsidianApp.openPluginSettingsTab();
+    await ObsidianApp.setTextSettingValue("Save delay (seconds)", "1");
+    await expect((await ObsidianApp.getPluginSettings()).saveDelaySeconds).toBe(3);
+
+    await ObsidianApp.openPluginSettingsTab();
+    await ObsidianApp.setTextSettingValue("Save delay (seconds)", "7200");
+    await expect((await ObsidianApp.getPluginSettings()).saveDelaySeconds).toBe(3600);
+  });
+
+  it("falls back to a valid number when save delay input is non-numeric and keeps working", async () => {
+    const notePath = "settings/non-numeric-delay.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.openPluginSettingsTab();
+    await ObsidianApp.setTextSettingValue("Save delay (seconds)", "abc");
+    await expect((await ObsidianApp.getPluginSettings()).saveDelaySeconds).toBe(10);
+
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("default fallback");
+    await ObsidianApp.waitForPendingStatus();
+    await expectSavedAfterDelay(notePath, "default fallback", 16000);
+  });
+
+  it("changes the saved and pending status colors and updates the status dot", async () => {
+    const notePath = "settings/status-colors.md";
+
+    await enableDelayedAutosave(30);
+    await ObsidianApp.openPluginSettingsTab();
+    await ObsidianApp.setColorSettingValue("Saved status color", "#ff0000");
+    await ObsidianApp.setColorSettingValue("Pending status color", "#0000ff");
+
+    await ObsidianApp.waitForSavedStatus();
+    await expect(await ObsidianApp.getStatusIndicatorColor()).toBe("rgb(255, 0, 0)");
+
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("x");
+    await ObsidianApp.waitForPendingStatus();
+    await expect(await ObsidianApp.getStatusIndicatorColor()).toBe("rgb(0, 0, 255)");
+  });
+
+  it("loads default settings and works from a fresh clean plugin state", async () => {
+    const notePath = "settings/fresh-defaults.md";
+    await ObsidianApp.clearPluginData();
+    await ObsidianApp.reloadPlugin();
+    const settings = await ObsidianApp.getPluginSettings();
+
+    await expect(settings.disableAutoSave).toBe(false);
+    await expect(settings.saveDelaySeconds).toBe(10);
+    await expect(settings.savedStatusColor).toBe("#32cd32");
+    await expect(settings.pendingStatusColor).toBe("#00bfff");
+    await ObsidianApp.waitForSavedStatus();
+
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.typeText("fresh install works");
+    await ObsidianApp.waitForPendingStatus();
+  });
+
+  it("blocks a plugin-triggered save before typing when the note is already dirty", async () => {
+    const notePath = "regressions/programmatic-save.md";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(notePath);
+    await ObsidianApp.pasteText("dirty without typing");
+    await ObsidianApp.runActiveViewSave();
+    await ObsidianApp.waitForPendingStatus();
+    await browser.pause(1200);
+    await expect(await ObsidianApp.readVaultFile(notePath)).toBe("");
+
+    await expectSavedAfterDelay(notePath, "dirty without typing");
+  });
+});

@@ -81,6 +81,37 @@ Colors and the size of the icon can be customized in settings.
 - Unsaved changes are kept in memory until written to disk.
 - If Obsidian or your system crashes before saving, changes may be lost.
 
+## Testing
+
+Setup:
+
+- Run `npm install`.
+- The first test run downloads Obsidian into `.obsidian-cache/`.
+
+Run all non-destructive tests:
+
+```bash
+npm run wdio
+```
+
+Run one specific test:
+
+```bash
+npx wdio run ./wdio.conf.mts --spec ./test/specs/autosave-control.e2e.ts --mochaOpts.grep "your test name"
+```
+
+Run the real quit/unload verification test:
+
+```bash
+npm run wdio:quit-save
+```
+
+Run everything:
+
+```bash
+npm run wdio:all
+```
+
 ## License
 
 MIT — see `LICENSE`
