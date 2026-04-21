@@ -29,6 +29,13 @@ async function expectSavedAfterDelay(
   }
 }
 
+async function expectQuickSwitcherLoadsTargetContent(notePath: string, expectedContent: string) {
+  await ObsidianApp.openExistingNoteViaQuickSwitcher(notePath, { focusEditor: false });
+  await browser.pause(300);
+  await expect(await ObsidianApp.getActiveFilePath()).toBe(notePath);
+  await expect(await ObsidianApp.getActiveEditorContent()).toBe(expectedContent);
+}
+
 describe("Autosave Control manual scenarios", () => {
   beforeEach(async () => {
     await ObsidianApp.reloadWithFreshVault();
@@ -275,6 +282,120 @@ describe("Autosave Control manual scenarios", () => {
     await expect(await ObsidianApp.readVaultFile(originalNotePath)).toBe("");
 
     await expectSavedAfterDelay(originalNotePath, "switch away");
+  });
+
+  it("opens an existing note through the quick switcher from a blank leaf without blanking the file", async () => {
+    const targetNotePath = "switching/quick-switch-blank-target.md";
+    const targetContent = "quick switch target should stay intact";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote("switching/quick-switch-anchor.md", "anchor");
+    await ObsidianApp.createAndOpenNote(targetNotePath, targetContent);
+    await ObsidianApp.closeActiveTab();
+    await browser.pause(300);
+    await expectQuickSwitcherLoadsTargetContent(targetNotePath, targetContent);
+    await browser.pause(4000);
+
+    await expect(await ObsidianApp.readVaultFile(targetNotePath)).toBe(targetContent);
+  });
+
+  it("opens an existing note through the quick switcher from a saved note without showing the previous note's content", async () => {
+    const sourceNotePath = "switching/quick-switch-saved-source.md";
+    const targetNotePath = "switching/quick-switch-saved-target.md";
+    const sourceContent = "quick switch saved source content";
+    const targetContent = "quick switch saved target content";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(targetNotePath, targetContent);
+    await ObsidianApp.createAndOpenNote(sourceNotePath, sourceContent);
+    await ObsidianApp.runSaveCommand();
+    await ObsidianApp.waitForSavedStatus();
+
+    await expectQuickSwitcherLoadsTargetContent(targetNotePath, targetContent);
+    await browser.pause(4000);
+
+    await expect(await ObsidianApp.readVaultFile(sourceNotePath)).toBe(sourceContent);
+    await expect(await ObsidianApp.readVaultFile(targetNotePath)).toBe(targetContent);
+  });
+
+  it("opens an existing note through the quick switcher from another unsaved note without showing the previous note's content", async () => {
+    const sourceNotePath = "switching/quick-switch-source.md";
+    const targetNotePath = "switching/quick-switch-target.md";
+    const sourceContent = "quick switch pending source content";
+    const targetContent = "quick switch target content should survive";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(targetNotePath, targetContent);
+    await ObsidianApp.createAndOpenNote(sourceNotePath);
+    await ObsidianApp.typeText(sourceContent);
+    await ObsidianApp.waitForPendingStatus();
+    await expectQuickSwitcherLoadsTargetContent(targetNotePath, targetContent);
+
+    await expectSavedAfterDelay(sourceNotePath, sourceContent);
+    await expect(await ObsidianApp.readVaultFile(targetNotePath)).toBe(targetContent);
+  });
+
+  it("keeps subsequent target edits scoped to the target note after quick switching from another unsaved note", async () => {
+    const sourceNotePath = "switching/quick-switch-edit-source.md";
+    const targetNotePath = "switching/quick-switch-edit-target.md";
+    const sourceContent = "source note pending content";
+    const targetContent = "target note original content";
+    const targetSuffix = " plus target edit";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(targetNotePath, targetContent);
+    await ObsidianApp.createAndOpenNote(sourceNotePath);
+    await ObsidianApp.typeText(sourceContent);
+    await ObsidianApp.waitForPendingStatus();
+
+    await expectQuickSwitcherLoadsTargetContent(targetNotePath, targetContent);
+    await ObsidianApp.typeText(targetSuffix);
+    await ObsidianApp.waitForPendingStatus();
+
+    await expectSavedAfterDelay(targetNotePath, `${targetContent}${targetSuffix}`);
+    await expectSavedAfterDelay(sourceNotePath, sourceContent);
+  });
+
+  it("keeps subsequent target edits scoped to the target note after quick switching from a saved note", async () => {
+    const sourceNotePath = "switching/quick-switch-saved-edit-source.md";
+    const targetNotePath = "switching/quick-switch-saved-edit-target.md";
+    const sourceContent = "saved source note content";
+    const targetContent = "saved target note content";
+    const targetSuffix = " plus fresh target edit";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(targetNotePath, targetContent);
+    await ObsidianApp.createAndOpenNote(sourceNotePath, sourceContent);
+    await ObsidianApp.runSaveCommand();
+    await ObsidianApp.waitForSavedStatus();
+
+    await expectQuickSwitcherLoadsTargetContent(targetNotePath, targetContent);
+    await ObsidianApp.typeText(targetSuffix);
+    await ObsidianApp.waitForPendingStatus();
+
+    await expectSavedAfterDelay(targetNotePath, `${targetContent}${targetSuffix}`);
+    await expect(await ObsidianApp.readVaultFile(sourceNotePath)).toBe(sourceContent);
+  });
+
+  it("opens an existing note through the quick switcher after manually saving the current note without copying that content", async () => {
+    const sourceNotePath = "switching/quick-switch-manual-save-source.md";
+    const targetNotePath = "switching/quick-switch-manual-save-target.md";
+    const sourceContent = "quick switch manual save source content";
+    const targetContent = "quick switch manual save target content";
+
+    await enableDelayedAutosave();
+    await ObsidianApp.createAndOpenNote(targetNotePath, targetContent);
+    await ObsidianApp.createAndOpenNote(sourceNotePath);
+    await ObsidianApp.typeText(sourceContent);
+    await ObsidianApp.waitForPendingStatus();
+    await ObsidianApp.runSaveCommand();
+    await ObsidianApp.waitForSavedStatus();
+
+    await expectQuickSwitcherLoadsTargetContent(targetNotePath, targetContent);
+    await browser.pause(4000);
+
+    await expect(await ObsidianApp.readVaultFile(sourceNotePath)).toBe(sourceContent);
+    await expect(await ObsidianApp.readVaultFile(targetNotePath)).toBe(targetContent);
   });
 
   it("loses the cursor position after switching away from a saved note and back", async () => {

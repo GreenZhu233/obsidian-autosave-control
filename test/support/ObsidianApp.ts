@@ -172,6 +172,77 @@ class ObsidianApp {
     await this.focusEditor(options);
   }
 
+  async openExistingNoteViaQuickSwitcher(notePath: string, options: { preserveCursor?: boolean; focusEditor?: boolean } = {}) {
+    const noteQuery = path.posix.basename(notePath, ".md");
+
+    await browser.execute(async () => {
+      const app = (window as typeof window & { app: any }).app;
+      const commands = app?.commands?.commands ?? {};
+      const quickSwitcherCommandId = (
+        ["switcher:open", "quick-switcher:open", "workspace:open-quick-switcher"].find((commandId) => commandId in commands)
+        ?? Object.entries(commands).find(([, command]) => {
+          const commandWithHotkeys = command as { hotkeys?: Array<{ modifiers?: string[]; key?: string }> };
+          const hotkeys = Array.isArray(commandWithHotkeys.hotkeys)
+            ? commandWithHotkeys.hotkeys
+            : [];
+
+          return hotkeys.some((hotkey) => {
+            const modifiers = new Set(hotkey.modifiers ?? []);
+            return modifiers.has("Mod") && String(hotkey.key ?? "").toLowerCase() === "o";
+          });
+        })?.[0]
+      );
+
+      if (!quickSwitcherCommandId) {
+        throw new Error("Quick switcher command was not found.");
+      }
+
+      app.commands.executeCommandById(quickSwitcherCommandId);
+    });
+
+    await browser.waitUntil(async () => {
+      return browser.execute(() => {
+        const input = document.querySelector(".prompt-input, .modal input[type='text'], .modal input") as HTMLElement | null;
+        return Boolean(input);
+      });
+    }, {
+      timeout: 10000,
+      timeoutMsg: "Quick switcher input did not appear in time.",
+    });
+
+    await browser.execute((nextQuery: string) => {
+      const input = document.querySelector(".prompt-input, .modal input[type='text'], .modal input") as HTMLInputElement | null;
+      if (!input) {
+        throw new Error("Quick switcher input not found.");
+      }
+
+      input.focus();
+      input.value = nextQuery;
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, data: nextQuery, inputType: "insertText" }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, noteQuery);
+
+    await browser.waitUntil(async () => {
+      return browser.execute((expectedPath: string, expectedQuery: string) => {
+        const items = Array.from(document.querySelectorAll(".suggestion-item"));
+        return items.some((item) => {
+          const text = item.textContent?.toLowerCase() ?? "";
+          return text.includes(expectedPath.toLowerCase()) || text.includes(expectedQuery.toLowerCase());
+        });
+      }, notePath, noteQuery);
+    }, {
+      timeout: 10000,
+      timeoutMsg: `Quick switcher did not list note '${notePath}' in time.`,
+    });
+
+    await browser.keys(["Enter"]);
+
+    await this.waitForActiveFile(notePath);
+    if (options.focusEditor !== false) {
+      await this.focusEditor(options);
+    }
+  }
+
   async waitForActiveFile(notePath: string) {
     await browser.waitUntil(async () => {
       return browser.execute((expectedPath: string) => {
@@ -305,6 +376,14 @@ class ObsidianApp {
     return browser.execute(() => {
       const app = (window as typeof window & { app: any }).app;
       return app.workspace.getActiveFile()?.path ?? null;
+    });
+  }
+
+  async getActiveEditorContent() {
+    return browser.execute(() => {
+      const app = (window as typeof window & { app: any }).app;
+      const view = app.workspace.activeLeaf?.view;
+      return view?.editor?.getValue?.() ?? null;
     });
   }
 
