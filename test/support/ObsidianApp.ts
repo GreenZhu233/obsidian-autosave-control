@@ -210,17 +210,10 @@ class ObsidianApp {
       timeoutMsg: "Quick switcher input did not appear in time.",
     });
 
-    await browser.execute((nextQuery: string) => {
-      const input = document.querySelector(".prompt-input, .modal input[type='text'], .modal input") as HTMLInputElement | null;
-      if (!input) {
-        throw new Error("Quick switcher input not found.");
-      }
-
-      input.focus();
-      input.value = nextQuery;
-      input.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, data: nextQuery, inputType: "insertText" }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    }, noteQuery);
+    const quickSwitcherInput = await $(".prompt-input, .modal input[type='text'], .modal input");
+    await quickSwitcherInput.waitForExist({ timeout: 10000 });
+    await quickSwitcherInput.click();
+    await browser.keys(Array.from(noteQuery));
 
     await browser.waitUntil(async () => {
       return browser.execute((expectedPath: string, expectedQuery: string) => {
@@ -236,6 +229,15 @@ class ObsidianApp {
     });
 
     await browser.keys(["Enter"]);
+    await browser.waitUntil(async () => {
+      return browser.execute(() => {
+        const input = document.querySelector(".prompt-input, .modal input[type='text'], .modal input");
+        return !input;
+      });
+    }, {
+      timeout: 10000,
+      timeoutMsg: "Quick switcher modal did not close in time.",
+    });
 
     await this.waitForActiveFile(notePath);
     if (options.focusEditor !== false) {
