@@ -17,14 +17,21 @@ export class EditActivityTracker {
       return;
     }
 
-    const recordEditActivity = () => this.recordActiveFileEditActivity(true);
+    const recordEditActivity = (event: Event) => {
+      if (!this.isEventFromMarkdownEditor(event)) {
+        return;
+      }
+
+      this.recordActiveFileEditActivity(true);
+    };
+
     const onKeydown = (event: KeyboardEvent) => {
       if (this.handleManualSaveShortcut(event)) {
         return;
       }
 
-      if (["Enter", "Backspace", "Delete"].includes(event.key)) {
-        recordEditActivity();
+      if (["Enter", "Backspace", "Delete"].includes(event.key) && this.isEventFromMarkdownEditor(event)) {
+        this.recordActiveFileEditActivity(true);
       }
     };
 
@@ -97,11 +104,26 @@ export class EditActivityTracker {
       dlog("Edit activity", filePath);
     }
   }
+
+  private isEventFromMarkdownEditor(event: Event): boolean {
+    const targetElement = event.target instanceof Element
+      ? event.target
+      : (document.activeElement instanceof Element ? document.activeElement : null);
+    if (!targetElement) {
+      return false;
+    }
+
+    if (targetElement.closest(".prompt, .modal, .suggestion-container, .prompt-input")) {
+      return false;
+    }
+
+    return targetElement.closest(".cm-editor") !== null;
+  }
 }
 
 type EditActivityWindowListeners = {
   keydown: (event: KeyboardEvent) => void;
-  input: () => void;
-  paste: () => void;
-  cut: () => void;
+  input: (event: Event) => void;
+  paste: (event: Event) => void;
+  cut: (event: Event) => void;
 };
