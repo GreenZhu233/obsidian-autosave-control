@@ -101,6 +101,60 @@ export class AutoSaveControlSettingsTab extends PluginSettingTab {
             this.host.applyStatusIconSize();
           })
       );
+
+    containerEl.createEl("h3", { text: "Excluded Files & Folders" });
+
+    let excludedPathInput: HTMLInputElement | null = null;
+
+    new Setting(containerEl)
+      .setName("Add excluded path")
+      .setDesc("Gitignore patterns: * (chars), ** (path), ? (single), [abc] (class). Prefix 'r/' for regex.")
+      .addText((textComponent) => {
+        textComponent.setPlaceholder("*.mdenc | Daily/* | **/template/**");
+        textComponent.inputEl.style.width = "200px";
+        textComponent.setValue("");
+        excludedPathInput = textComponent.inputEl;
+      })
+      .addButton((buttonComponent) => {
+        buttonComponent.setButtonText("Add").setCta();
+        buttonComponent.buttonEl.addEventListener("click", async () => {
+          if (!excludedPathInput) return;
+          const path = excludedPathInput.value.trim();
+          if (!path) return;
+          if (!this.host.settings.excludedPaths.includes(path)) {
+            this.host.settings.excludedPaths.push(path);
+            await this.host.saveSettings();
+          }
+          excludedPathInput.value = "";
+          this.display();
+        });
+      });
+
+    const excludedPaths = [...this.host.settings.excludedPaths];
+    for (const path of excludedPaths) {
+      new Setting(containerEl)
+        .setName(path)
+        .setDesc("")
+        .addButton((buttonComponent) => {
+          buttonComponent.setIcon("trash");
+          buttonComponent.setTooltip("Remove exclusion");
+          buttonComponent.buttonEl.addEventListener("click", async () => {
+            const index = this.host.settings.excludedPaths.indexOf(path);
+            if (index > -1) {
+              this.host.settings.excludedPaths.splice(index, 1);
+              await this.host.saveSettings();
+              this.display();
+            }
+          });
+        });
+    }
+
+    if (excludedPaths.length === 0) {
+      containerEl.createEl("p", {
+        text: "No excluded paths. Examples: *.mdenc (all mdenc), Daily/* (in Daily/), **/backup/** (in any backup folder).",
+        cls: "setting-item-description",
+      });
+    }
   }
 
   private addColorSetting(options: ColorSettingOptions) {

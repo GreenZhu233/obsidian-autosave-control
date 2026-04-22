@@ -1,4 +1,4 @@
-import { Plugin } from "obsidian";
+import { MarkdownView, Plugin } from "obsidian";
 import { AutoSaveController } from "./autosave/AutoSaveController";
 import { DEFAULT_SETTINGS, type AutoSaveControlSettings } from "./settings/AutoSaveSettings";
 import { installStatusStyles } from "./styles/installStatusStyles";
@@ -24,9 +24,21 @@ export default class AutoSaveControlPlugin extends Plugin {
 
     this.autosaveController = new AutoSaveController(this.app, () => this.settings);
     this.autosaveController.setPendingSaveCountChangeHandler((pendingSaveCount) => {
-      this.saveStatusIndicator.setPendingSaveCount(pendingSaveCount);
+      const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      this.saveStatusIndicator.setPendingSaveCount(pendingSaveCount, activeView?.file?.path);
     });
     this.autosaveController.enable();
+
+    // Check excluded status when switching files
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (!leaf || !(leaf.view instanceof MarkdownView)) {
+          this.saveStatusIndicator.setPendingSaveCount(0, null);
+          return;
+        }
+        this.saveStatusIndicator.checkAndHideForActiveFile(leaf.view.file?.path);
+      })
+    );
 
     this.installStyles();
     this.applyStatusColors();

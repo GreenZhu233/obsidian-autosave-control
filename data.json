@@ -1,5 +1,10 @@
 {
+  "disableAutoSave": false,
   "saveDelaySeconds": 10,
   "savedStatusColor": "#00ffaa",
-  "pendingStatusColor": "#ff0000"
+  "pendingStatusColor": "#ff0000",
+  "statusIconSizePx": 16,
+  "excludedPaths": [
+    "*.mdenc"
+  ]
 }

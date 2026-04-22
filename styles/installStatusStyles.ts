@@ -5,6 +5,7 @@ export function installStatusStyles(): HTMLStyleElement {
     .save-status-icon { font-size: var(--asc-icon-size, 16px); }
     .save-status-icon.asc-saved { color: var(--asc-saved-color, #32cd32); }
     .save-status-icon.asc-pending { color: var(--asc-pending-color, #00bfff); }
+    .save-status-icon.asc-hidden { display: none; }
   `;
 
   document.head.appendChild(styleElement);

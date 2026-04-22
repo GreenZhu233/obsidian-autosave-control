@@ -39,6 +39,258 @@ export class AutoSaveController {
 
   private readonly editActivityTracker: EditActivityTracker;
   private readonly pendingSaveQueue: PendingSaveQueue;
+
+  isPathExcluded(filePath: string): boolean {
+    const excludedPatterns = this.getSettings().excludedPaths;
+    if (!excludedPatterns || excludedPatterns.length === 0) {
+      return false;
+    }
+
+    const normalizedPath = filePath.replace(/\\/g, "/");
+
+    return excludedPatterns.some((pattern) => {
+      const trimmedPattern = pattern.trim();
+
+      // Skip empty patterns and comments
+      if (!trimmedPattern || trimmedPattern.startsWith("#")) {
+        return false;
+      }
+
+      // Regex pattern: starts with "r/" and ends with "/"
+      if (trimmedPattern.startsWith("r/") && trimmedPattern.endsWith("/")) {
+        const regexPattern = trimmedPattern.slice(2, -1);
+        try {
+          const regex = new RegExp(regexPattern);
+          return regex.test(normalizedPath);
+        } catch {
+          dlog("Invalid regex pattern in excluded path", { pattern: regexPattern });
+          return false;
+        }
+      }
+
+      // Gitignore-style pattern matching
+      return this.matchGitignorePattern(normalizedPath, trimmedPattern);
+    });
+  }
+
+  private matchGitignorePattern(path: string, pattern: string): boolean {
+    // Handle negation (not implemented, skip)
+    if (pattern.startsWith("!")) {
+      return false;
+    }
+
+    // Handle trailing / (directory only)
+    const isDirectoryPattern = pattern.endsWith("/");
+    const cleanPattern = isDirectoryPattern ? pattern.slice(0, -1) : pattern;
+
+    // Split pattern into parts by /
+    const patternParts = cleanPattern.split("/");
+    const pathParts = path.split("/");
+
+    // If pattern starts with /, it must match from the root
+    const matchFromRoot = cleanPattern.startsWith("/");
+    const effectivePatternStart = matchFromRoot ? 0 : Math.max(0, pathParts.length - patternParts.length);
+
+    // Handle ** (globstar) - matches any number of directories
+    const hasGlobstar = patternParts.some((part) => part === "**");
+
+    if (hasGlobstar) {
+      return this.matchWithGlobstar(pathParts, patternParts, effectivePatternStart, isDirectoryPattern);
+    }
+
+    // Simple pattern matching (no **)
+    let patternIdx = 0;
+    let pathIdx = effectivePatternStart;
+
+    // For patterns without /, they can match anywhere
+    if (!cleanPattern.includes("/")) {
+      pathIdx = 0;
+    }
+
+    while (patternIdx < patternParts.length && pathIdx < pathParts.length) {
+      const p = patternParts[patternIdx];
+      const n = pathParts[pathIdx];
+
+      if (p === "**") {
+        // ** followed by nothing = match everything
+        if (patternIdx === patternParts.length - 1) {
+          return true;
+        }
+        // ** followed by pattern part - try matching at each position
+        const nextPattern = patternParts[patternIdx + 1];
+        while (pathIdx < pathParts.length) {
+          if (this.matchSinglePart(pathParts[pathIdx], nextPattern)) {
+            if (this.matchParts(pathParts, patternParts, pathIdx + 1, patternIdx + 2)) {
+              return true;
+            }
+          }
+          pathIdx++;
+        }
+        return false;
+      }
+
+      if (!this.matchSinglePart(n, p)) {
+        // If pattern doesn't start with /, allow matching anywhere
+        if (!matchFromRoot && patternIdx === 0 && pathIdx === 0) {
+          pathIdx++;
+          continue;
+        }
+        return false;
+      }
+
+      patternIdx++;
+      pathIdx++;
+    }
+
+    // Handle trailing ** in pattern
+    if (patternParts[patternParts.length - 1] === "**") {
+      return true;
+    }
+
+    // Check if we've matched all pattern parts
+    if (patternIdx !== patternParts.length) {
+      return false;
+    }
+
+    // Check if we've consumed all path parts (or directory match)
+    if (pathIdx !== pathParts.length && !isDirectoryPattern) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private matchWithGlobstar(pathParts: string[], patternParts: string[], startIdx: number, isDirectoryPattern: boolean): boolean {
+    // Find the globstar position
+    const globstarIdx = patternParts.findIndex((p) => p === "**");
+    const beforeGlobstar = patternParts.slice(0, globstarIdx);
+    const afterGlobstar = patternParts.slice(globstarIdx + 1);
+
+    // Match the part before **
+    if (beforeGlobstar.length > 0) {
+      const beforeStart = startIdx;
+      const beforeEnd = beforeStart + beforeGlobstar.length;
+      if (beforeEnd > pathParts.length) {
+        return false;
+      }
+      for (let i = 0; i < beforeGlobstar.length; i++) {
+        if (!this.matchSinglePart(pathParts[beforeStart + i], beforeGlobstar[i])) {
+          return false;
+        }
+      }
+    }
+
+    // Match the part after **
+    if (afterGlobstar.length > 0) {
+      let foundMatch = false;
+      for (let i = pathParts.length; i >= 0; i--) {
+        let pathIdx = i;
+        let patternIdx = 0;
+        let matched = true;
+
+        while (patternIdx < afterGlobstar.length && pathIdx < pathParts.length) {
+          if (!this.matchSinglePart(pathParts[pathIdx], afterGlobstar[patternIdx])) {
+            matched = false;
+            break;
+          }
+          patternIdx++;
+          pathIdx++;
+        }
+
+        if (matched && patternIdx === afterGlobstar.length) {
+          if (pathIdx === pathParts.length || !isDirectoryPattern) {
+            foundMatch = true;
+            break;
+          }
+        }
+      }
+      return foundMatch;
+    }
+
+    return true;
+  }
+
+  private matchParts(pathParts: string[], patternParts: string[], pathStart: number, patternStart: number): boolean {
+    let pathIdx = pathStart;
+    let patternIdx = patternStart;
+
+    while (patternIdx < patternParts.length && pathIdx < pathParts.length) {
+      const p = patternParts[patternIdx];
+      const n = pathParts[pathIdx];
+
+      if (p === "**") {
+        if (patternIdx === patternParts.length - 1) {
+          return true;
+        }
+        patternIdx++;
+        continue;
+      }
+
+      if (!this.matchSinglePart(n, p)) {
+        return false;
+      }
+
+      patternIdx++;
+      pathIdx++;
+    }
+
+    return patternIdx === patternParts.length;
+  }
+
+  private matchSinglePart(name: string, pattern: string): boolean {
+    let regexPattern = "";
+    let i = 0;
+
+    while (i < pattern.length) {
+      const char = pattern[i];
+
+      if (char === "*") {
+        // Check for **
+        if (pattern[i + 1] === "*") {
+          regexPattern += ".*";
+          i += 2;
+          continue;
+        }
+        // Single * matches anything except /
+        regexPattern += "[^/]*";
+        i++;
+        continue;
+      }
+
+      if (char === "?") {
+        regexPattern += "[^/]";
+        i++;
+        continue;
+      }
+
+      if (char === "[") {
+        // Character class
+        const closeIdx = pattern.indexOf("]", i);
+        if (closeIdx !== -1) {
+          regexPattern += pattern.slice(i, closeIdx + 1);
+          i = closeIdx + 1;
+          continue;
+        }
+      }
+
+      // Escape regex special characters
+      if ("\\.+^${}|()[]^".includes(char)) {
+        regexPattern += "\\" + char;
+      } else {
+        regexPattern += char;
+      }
+
+      i++;
+    }
+
+    try {
+      const regex = new RegExp("^" + regexPattern + "$");
+      return regex.test(name);
+    } catch {
+      // Fallback to exact match
+      return name === pattern;
+    }
+  }
   private readonly beforeUnloadListenersByWindow = new Map<Window, BeforeUnloadListener>();
   private readonly quitShortcutListenersByWindow = new Map<Window, (event: KeyboardEvent) => void>();
   private readonly fileSwitchingLeaves = new WeakSet<WorkspaceLeaf>();
@@ -56,10 +308,15 @@ export class AutoSaveController {
           return;
         }
 
+        if (this.isPathExcluded(filePath)) {
+          return;
+        }
+
         this.pendingSaveQueue.schedule(filePath, view as unknown as TextFileView);
       },
       (event) => this.isManualSaveShortcut(event),
       (view, filePath, event) => this.handleManualSaveShortcut(view, filePath, event),
+      (filePath) => this.isPathExcluded(filePath),
     );
     this.pendingSaveQueue = new PendingSaveQueue(
       this.app,
@@ -252,6 +509,11 @@ export class AutoSaveController {
         return originalSave.apply(this, args);
       }
 
+      if (controller.isPathExcluded(filePath)) {
+        dlog("Skipping save wrapper for excluded file", { filePath });
+        return originalSave.apply(this, args);
+      }
+
       if (controller.discardedFilePaths.has(filePath)) {
         dlog("Suppressing save for discarded file", { filePath, args });
         return;
@@ -289,6 +551,11 @@ export class AutoSaveController {
     const controller = this;
 
     const wrappedOnUnloadFile = async function wrappedOnUnloadFile(this: TextFileView, file: TFile) {
+      if (controller.isPathExcluded(file.path)) {
+        dlog("Skipping onUnloadFile wrapper for excluded file", { filePath: file.path });
+        return originalOnUnloadFile.call(this, file);
+      }
+
       if (controller.discardedFilePaths.has(file.path)) {
         controller.discardedFilePaths.delete(file.path);
         return;
@@ -318,6 +585,11 @@ export class AutoSaveController {
     const wrappedRequestSave = function wrappedRequestSave(this: TextFileView, ...args: unknown[]) {
       const filePath = this.file?.path;
       if (!filePath) {
+        return originalRequestSave.apply(this, args);
+      }
+
+      if (controller.isPathExcluded(filePath)) {
+        dlog("Skipping requestSave wrapper for excluded file", { filePath });
         return originalRequestSave.apply(this, args);
       }
 
@@ -388,6 +660,11 @@ export class AutoSaveController {
 
     const wrappedDetach = function wrappedDetach(this: WorkspaceLeaf) {
       const filePath = controller.getLeafMarkdownFilePath(this);
+      if (filePath && controller.isPathExcluded(filePath)) {
+        dlog("Skipping detach wrapper for excluded file", { filePath });
+        return originalDetach.call(this);
+      }
+
       if (filePath) {
         controller.syncPendingDataForFile(filePath);
       }

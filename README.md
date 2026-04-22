@@ -62,6 +62,33 @@ Colors and the size of the icon can be customized in settings.
 
 - Size of the status bar dot in pixels.
 
+### Excluded Files & Folders
+
+You can exclude specific files or folders from autosave control. Excluded files will:
+- Use Obsidian's default autosave behavior
+- Not show the status indicator icon
+
+**Supported patterns (gitignore-style):**
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `*` | Matches any characters (except `/`) | `*.mdenc` matches all `.mdenc` files |
+| `**` | Matches any path | `**/backup/**` matches any `backup` folder |
+| `?` | Matches single character | `file?.md` matches `file1.md`, `fileA.md` |
+| `[abc]` | Matches character class | `file[12].md` matches `file1.md`, `file2.md` |
+| `/` prefix | Match from root only | `/config/` only matches root `config` folder |
+| `/` suffix | Match directory only | `build/` matches `build` folder and contents |
+| `r/pattern/` | Regular expression | `r/^Daily\d*$/` for regex matching |
+
+**Examples:**
+
+- `*.mdenc` — All files with `.mdenc` extension
+- `Daily/*` — All files in the `Daily` folder
+- `**/template/**` — Files in any `template` folder anywhere
+- `Assets/*` — All files in `Assets` folder
+- `**/*.log` — All log files anywhere
+- `r/^Daily\d{4}-\d{2}-\d{2}$/` — Daily notes with date format
+
 ## Installation
 
 1. Download the latest release from GitHub:  

@@ -10,6 +10,7 @@ export class EditActivityTracker {
     private readonly onEditActivity?: (view: MarkdownView, filePath: string) => void,
     private readonly isManualSaveShortcut?: (event: KeyboardEvent) => boolean,
     private readonly onManualSaveShortcut?: (view: MarkdownView, filePath: string, event: KeyboardEvent) => boolean,
+    private readonly isPathExcluded?: (filePath: string) => boolean,
   ) {}
 
   attachToWindow(targetWindow: Window | null | undefined) {
@@ -94,6 +95,13 @@ export class EditActivityTracker {
     const filePath = activeMarkdownView?.file?.path;
 
     if (!filePath) {
+      return;
+    }
+
+    if (this.isPathExcluded?.(filePath)) {
+      if (shouldLog) {
+        dlog("Edit activity skipped for excluded file", filePath);
+      }
       return;
     }
 

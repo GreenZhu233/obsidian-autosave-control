@@ -4,6 +4,7 @@ export interface AutoSaveControlSettings {
   savedStatusColor: string;
   pendingStatusColor: string;
   statusIconSizePx: number;
+  excludedPaths: string[];
 }
 
 export const DEFAULT_SETTINGS: AutoSaveControlSettings = {
@@ -12,4 +13,5 @@ export const DEFAULT_SETTINGS: AutoSaveControlSettings = {
   savedStatusColor: "#32cd32",
   pendingStatusColor: "#00bfff",
   statusIconSizePx: 16,
+  excludedPaths: [],
 };
